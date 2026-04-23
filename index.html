@@ -3,31 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Zen Master Mode</title>
+  <title>Nomad State — Relaxed Posture Mode</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <style>
     body { font-family: system-ui, sans-serif; background: #0a0a1f; color: #e0d4ff; text-align: center; margin: 0; padding: 20px; }
     #visual-area { width: 100%; max-width: 640px; height: 360px; margin: 20px auto; border-radius: 20px; background: #000; overflow: hidden; border: 3px solid #ffd700; position: relative; }
-    /* Fix: Ensure videos are visible and layered correctly */
-    video { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; display: block; }
-    #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; }
+    video { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; }
+    #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; }
     #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
-    .bad { color: #ff3333; }
+    .good { color: #00ff9d; }
+    .bad { color: #ff3333; font-weight: bold; }
   </style>
 </head>
 <body>
   <h1>🪷 Nomad State</h1>
-  <div id="wallet-display" style="font-size:0.8em; opacity:0.6;">Not Connected</div>
+  <div id="wallet-display" style="font-size:0.8em; opacity:0.6;">Disconnected</div>
   
-  <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Phantom</button>
-  <button id="test-btn" class="btn" onclick="testVoice()">Test Master Voice</button>
+  <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Wallet</button>
+  <button id="test-btn" class="btn" onclick="testVoice()">Test Voice</button>
 
-  <div style="font-size: 1.1em; margin: 10px;">Balance: <span id="db-balance">0.00</span> NOMAD</div>
+  <div style="font-size: 1.1em; margin: 10px;">Total: <span id="db-balance">0.00</span> NOMAD</div>
   <div id="live-counter">0.0000</div>
-  <div id="status">Welcome</div>
+  <div id="status">Ready</div>
 
   <div id="visual-area">
     <video id="active-video" loop muted playsinline></video>
@@ -36,7 +36,7 @@
   <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
   <button id="end-btn" class="btn" onclick="processSessionEnd('Manual')" disabled>End Session</button>
 
-  <div id="metrics" style="margin-top:10px; font-size:0.9em;">
+  <div id="metrics" style="margin-top:10px; font-size: 1.1em;">
     Eyes: <span id="eyes">—</span> | Posture: <span id="spine">—</span>
   </div>
 
@@ -55,7 +55,7 @@
       window.speechSynthesis.speak(u);
     }
 
-    function testVoice() { speak("The master is awake. Testing audio levels."); }
+    function testVoice() { speak("The Zen Master is listening."); }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
@@ -72,24 +72,16 @@
       document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(4);
     }
 
-    // --- CHALLENGE LOGIC (KAPTCHA MODE) ---
     function triggerChallenge() {
       if (!isRunning) return;
       const prompts = ["tilt your head to the left", "tilt your head to the right", "bow your head forward"];
       activeChallenge = prompts[Math.floor(Math.random() * prompts.length)];
-      speak(activeChallenge);
-      statusEl.textContent = "⚡ CHALLENGE: " + activeChallenge.toUpperCase();
+      speak("Please " + activeChallenge);
+      statusEl.textContent = "⚡ " + activeChallenge.toUpperCase();
 
-      // Give 8 seconds to complete challenge
       setTimeout(() => {
         if (activeChallenge) processSessionEnd("Kaptcha Failed");
-      }, 8000);
-    }
-
-    function scheduleRandomChallenge() {
-      // 3 to 17 minutes
-      const delay = Math.random() * (1020000 - 180000) + 180000;
-      setTimeout(triggerChallenge, delay);
+      }, 12000); // Increased to 12s for comfort
     }
 
     async function toggleSession() {
@@ -105,14 +97,10 @@
         liveEarned = 0;
         document.getElementById('start-btn').disabled = true;
         document.getElementById('end-btn').disabled = false;
-        
         videoEl.src = "buddha.mp4";
         videoEl.play();
-        statusEl.textContent = "🟢 Mining Active";
-
-        // 1. Initial Check 15 seconds in
+        statusEl.textContent = "🟢 Session Active";
         setTimeout(triggerChallenge, 15000);
-        
         tickerInterval = setInterval(() => {
           liveEarned += 0.00018;
           document.getElementById('live-counter').textContent = liveEarned.toFixed(4);
@@ -126,41 +114,54 @@
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
 
+      // 1. EYES (Lenient)
       let eyesClosed = false;
-      let currentPose = "center";
-
       if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
         const lm = results.multiFaceLandmarks[0];
         const ear = (Math.hypot(lm[160].y-lm[144].y) + Math.hypot(lm[158].y-lm[153].y)) / (2 * Math.hypot(lm[33].x-lm[133].x));
-        
-        // --- LENIENT SETTING ---
-        // EAR threshold 0.18 is much more lenient than 0.22. 
-        // 45 frames (1.5 seconds) of buffer for blinking.
-        if (ear < 0.18) closedFrameCount++; else closedFrameCount = 0;
-        eyesClosed = (closedFrameCount >= 45); 
+        if (ear < 0.17) closedFrameCount++; else closedFrameCount = 0;
+        eyesClosed = (closedFrameCount >= 35); 
         document.getElementById('eyes').textContent = eyesClosed ? "✅" : "⚠️ OPEN";
+        document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
       }
 
+      // 2. LOOSE POSTURE & SENSITIVE KAPTCHA
+      let postureGood = false;
+      let currentPose = "center";
       if (results.poseLandmarks) {
         const nose = results.poseLandmarks[0];
         const ls = results.poseLandmarks[11];
         const rs = results.poseLandmarks[12];
         
-        // Check current pose for Kaptcha
-        if (nose.x < ls.x - 0.05) currentPose = "tilt your head to the left";
-        else if (nose.x > rs.x + 0.05) currentPose = "tilt your head to the right";
-        else if (nose.y > (ls.y + rs.y) / 2 + 0.05) currentPose = "bow your head forward";
+        // POSTURE REQUIREMENT: Nose must be higher than the average shoulder height
+        postureGood = nose.y < ((ls.y + rs.y) / 2);
+        document.getElementById('spine').textContent = postureGood ? "✅ Head Up" : "⚠️ Slumped";
+        document.getElementById('spine').className = postureGood ? "good" : "bad";
+
+        // KAPTCHA SENSITIVITY (0.02)
+        if (nose.x < ls.x - 0.02) currentPose = "tilt your head to the left";
+        else if (nose.x > rs.x + 0.02) currentPose = "tilt your head to the right";
+        else if (nose.y > (ls.y + rs.y) / 2 + 0.02) currentPose = "bow your head forward";
 
         if (activeChallenge && currentPose === activeChallenge) {
           activeChallenge = null;
-          statusEl.textContent = "✅ Challenge Met";
-          scheduleRandomChallenge();
+          statusEl.textContent = "✅ Accepted. Return to center.";
+          setTimeout(() => { 
+            if(isRunning) {
+                statusEl.textContent = "🟢 Session Active";
+                const delay = Math.random() * (900000 - 180000) + 180000; // 3 to 15 min loop
+                setTimeout(triggerChallenge, delay);
+            }
+          }, 3000);
         }
       }
 
-      // Enforcement
       if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
-      if (eyesOpenTime > 5000) processSessionEnd("Eyes Opened Too Long");
+      if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
+
+      if (eyesOpenTime > 6000 || badPostureTime > 10000) { // 10s grace for posture
+          processSessionEnd("Rule Violation");
+      }
     }
 
     async function processSessionEnd(reason) {
@@ -169,6 +170,7 @@
       clearInterval(tickerInterval);
       videoEl.src = "pikachu.mp4";
       videoEl.play();
+      statusEl.textContent = "⌛ Saving...";
 
       await fetch(`${BACKEND_URL}/api/end-session`, {
         method: 'POST',
@@ -176,7 +178,7 @@
         body: JSON.stringify({ walletAddress: userWallet, earnedAmount: liveEarned })
       });
 
-      statusEl.innerHTML = `🏁 ${reason}: <span style="color:#00ff9d">+${liveEarned.toFixed(4)}</span>`;
+      statusEl.innerHTML = `🏁 ${reason}: <span class="good">+${liveEarned.toFixed(4)}</span>`;
       fetchBalance();
       document.getElementById('start-btn').disabled = false;
       document.getElementById('end-btn').disabled = true;
@@ -190,7 +192,7 @@
       poseDetector.onResults(onResults);
       faceMesh.onResults(onResults);
       const v = document.createElement('video');
-      camera = new Camera(v, { onFrame: async () => { if(isRunning) { await poseDetector.send({image: v}); await faceMesh.send({image: v}); } }, width: 640, height: 480 });
+      camera = new Camera(v, { onFrame: async () => { if(isRunning) { await poseDetector.send({image: v}); await faceMesh.send({image: v}); } } });
       await camera.start();
     }
   </script>
