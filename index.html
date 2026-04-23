@@ -283,6 +283,225 @@
     }
   </script>
 </body>
+</html>    Eyes: <span id="eyes" class="bad">Waiting...</span> | Posture: <span id="spine" class="bad">Waiting...</span>
+  </div>
+
+  <script>
+    const BACKEND_URL = "https://nomad-backend-u20g.onrender.com";
+    let isRunning = false, userWallet = null, liveEarned = 0, tickerInterval = null;
+    let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
+    let faceMesh, camera;
+    
+    // Slider State
+    let challengeActive = false, challengeTimer = null;
+    let violationPaused = false; // Controls the 2-second buffers
+
+    function speak(text) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.85; u.pitch = 0.6;
+      window.speechSynthesis.speak(u);
+    }
+
+    function testVoice() { speak("The Master's audio is ready."); }
+
+    async function connectWallet() {
+      const provider = window?.phantom?.solana || window?.solana;
+      if (!provider) return alert("Phantom wallet not found!");
+      const resp = await provider.connect();
+      userWallet = resp.publicKey.toString();
+      document.getElementById('wallet-display').textContent = userWallet;
+      document.getElementById('start-btn').disabled = false;
+      fetchBalance();
+    }
+
+    async function fetchBalance() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/balance/${userWallet}`);
+        const data = await res.json();
+        document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(4);
+      } catch(e) {}
+    }
+
+    // --- NEW SLIDER CHALLENGE LOGIC ---
+    function triggerChallenge() {
+      if (!isRunning) return;
+      
+      // Step 1: Pause violations and give a 2-second warning buffer
+      violationPaused = true; 
+      speak("Center your energy.");
+      document.getElementById('status').textContent = "🧘 PREPARING...";
+      document.getElementById('status').className = "";
+
+      setTimeout(() => {
+        if(!isRunning) return;
+        
+        // Step 2: Show Slider & Start Countdown
+        document.getElementById('slider-container').style.display = "block";
+        document.getElementById('zen-slider').value = 0;
+        document.getElementById('status').textContent = "👉 DRAG SLIDER TO 100%";
+        document.getElementById('status').className = "bad";
+        
+        challengeActive = true;
+        
+        challengeTimer = setTimeout(() => {
+          if (challengeActive) {
+            speak("You have lost focus.");
+            processSessionEnd("Slider Timeout");
+          }
+        }, 15000); // 15 seconds to drag the slider
+      }, 2000); // The 2-second "Before" Buffer
+    }
+
+    // Slider Event Listener
+    document.getElementById('zen-slider').addEventListener('input', function() {
+      if (!challengeActive || !isRunning) return;
+      
+      if (this.value == 100) {
+        // Success!
+        clearTimeout(challengeTimer);
+        challengeActive = false;
+        document.getElementById('slider-container').style.display = "none";
+        
+        document.getElementById('status').textContent = "✅ ENERGY BALANCED";
+        document.getElementById('status').className = "good";
+        speak("Excellent.");
+
+        // Step 3: The 2-second "After" Buffer to close eyes again
+        setTimeout(() => {
+          if(isRunning) {
+            document.getElementById('status').textContent = "🟢 Session Active";
+            violationPaused = false; // Violations re-activated!
+            
+            // Schedule next challenge (3 to 15 mins)
+            const delay = Math.random() * (900000 - 180000) + 180000;
+            setTimeout(triggerChallenge, delay);
+          }
+        }, 2000);
+      }
+    });
+
+    async function toggleSession() {
+      document.getElementById('status').textContent = "⌛ Booting AI Engine...";
+      try { if (!camera) await initAI(); } catch(e) { return; }
+      
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/start-session`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ walletAddress: userWallet })
+        });
+        
+        if (res.ok) {
+          isRunning = true; 
+          liveEarned = 0;
+          violationPaused = false; // Make sure rules are active to start
+          
+          document.getElementById('start-btn').disabled = true;
+          document.getElementById('end-btn').disabled = false;
+          
+          const v = document.getElementById('active-video');
+          v.src = "buddha.mp4";
+          v.play();
+          
+          document.getElementById('status').textContent = "🟢 Session Active";
+          document.getElementById('status').className = "good";
+          
+          // First check at 15 seconds
+          setTimeout(triggerChallenge, 15000);
+          
+          tickerInterval = setInterval(() => {
+            liveEarned += 0.00018;
+            document.getElementById('live-counter').textContent = liveEarned.toFixed(4);
+          }, 100);
+        }
+      } catch(e) {}
+    }
+
+    function onResults(results) {
+      if (!isRunning) return;
+      const now = Date.now();
+      const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
+      lastFrameTime = now;
+
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const lm = results.multiFaceLandmarks[0];
+        
+        const ear = (Math.hypot(lm[159].x - lm[145].x, lm[159].y - lm[145].y) + Math.hypot(lm[158].x - lm[153].x, lm[158].y - lm[153].y)) / (2 * Math.hypot(lm[33].x - lm[133].x, lm[33].y - lm[133].y));
+        if (ear < 0.18) closedFrameCount++; else closedFrameCount = 0;
+        const eyesClosed = closedFrameCount >= 20; 
+        
+        document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
+        document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
+        
+        // Ultra-loose posture: nose can go almost to the bottom of the frame
+        const postureGood = lm[1].y < 0.95; 
+        
+        document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
+        document.getElementById('spine').className = postureGood ? "good" : "bad";
+
+        // ONLY add to violation timers if the Kaptcha buffers are NOT active
+        if (!violationPaused) {
+            if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
+            if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
+
+            if (eyesOpenTime > 6000 || badPostureTime > 10000) {
+              speak("You have broken the rules of the Sangha.");
+              processSessionEnd("Rule Violation");
+            }
+        } else {
+            // While Kaptcha/Buffers are active, reset timers so they don't trigger
+            eyesOpenTime = 0;
+            badPostureTime = 0;
+        }
+
+      } else {
+         document.getElementById('eyes').textContent = "❓ Face Lost";
+         document.getElementById('spine').textContent = "❓ Face Lost";
+      }
+    }
+
+    async function processSessionEnd(reason) {
+      if (!isRunning) return;
+      isRunning = false;
+      clearInterval(tickerInterval);
+      clearTimeout(challengeTimer);
+      challengeActive = false;
+      violationPaused = false;
+      document.getElementById('slider-container').style.display = "none";
+      
+      const v = document.getElementById('active-video');
+      v.src = "pikachu.mp4";
+      v.play();
+      
+      document.getElementById('status').textContent = "⌛ Syncing...";
+      document.getElementById('status').className = "";
+
+      try {
+          await fetch(`${BACKEND_URL}/api/end-session`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ walletAddress: userWallet, earnedAmount: liveEarned })
+          });
+          document.getElementById('status').innerHTML = `🏁 ${reason}: <span class="good">+${liveEarned.toFixed(4)}</span>`;
+          fetchBalance();
+      } catch(e) {}
+      
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('end-btn').disabled = true;
+    }
+
+    async function initAI() {
+      faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}` });
+      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+      faceMesh.onResults(onResults);
+      
+      const webcam = document.getElementById('hidden-webcam');
+      camera = new Camera(webcam, { 
+          onFrame: async () => { if(isRunning) await faceMesh.send({image: webcam}); },
+          width: 640, height: 480
+      });
+      await camera.start();
+    }
+  </script>
+</body>
 </html>    if (SpeechRecognition) {
       recognition = new SpeechRecognition();
       recognition.continuous = true;
