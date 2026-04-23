@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Bulletproof AI</title>
+  <title>Nomad State — Voice Kaptcha</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
   <style>
     body { font-family: system-ui, sans-serif; background: #0a0a1f; color: #e0d4ff; text-align: center; margin: 0; padding: 20px; }
     #visual-area { width: 100%; max-width: 640px; height: 360px; margin: 20px auto; border-radius: 20px; background: #000; overflow: hidden; border: 3px solid #ffd700; position: relative; }
     video.main-vid { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; }
-    #hidden-webcam { display: none; } /* Physically in the HTML, but invisible to user */
+    #hidden-webcam { display: none; } 
     #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; text-transform: uppercase; }
     #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
@@ -21,12 +21,12 @@
     #ai-debug { font-size: 0.8em; color: #ff00ff; margin-top: 10px; font-family: monospace; }
   </style>
 </head>
-<body onkeydown="if(event.code==='Space') registerChant()" onclick="registerChant()">
+<body onkeydown="if(event.code==='Space') registerChant(1)" onclick="registerChant(1)">
   <h1>🪷 Nomad State</h1>
   <div id="wallet-display" style="font-size:0.8em; opacity:0.6;">Disconnected</div>
   
   <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Wallet</button>
-  <button id="test-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Voice</button>
+  <button id="test-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Voice & Mic</button>
 
   <div style="font-size: 1.1em; margin: 10px;">Total Balance: <span id="db-balance">0.00</span> NOMAD</div>
   <div id="live-counter">0.0000</div>
@@ -53,9 +53,44 @@
     let isRunning = false, userWallet = null, liveEarned = 0, tickerInterval = null;
     let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
     let faceMesh, camera;
+    
+    // Kaptcha State
     let reqChants = 0, curChants = 0, challengeActive = false, challengeTimer = null;
 
     const debugEl = document.getElementById('ai-debug');
+
+    // --- SPEECH RECOGNITION SETUP ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false; // Only triggers when you pause speaking
+      
+      recognition.onresult = (event) => {
+        if (!challengeActive) return;
+        
+        // Get the latest word spoken
+        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
+        debugEl.textContent = "Mic Heard: " + transcript;
+
+        // FUZZY DICTIONARY: All the ways the browser might mishear "Shiva"
+        const shivaVariations = /shiva|sheva|chiva|sheba|siva|shiba|siba|she wa|see va|shiv|she|sea/gi;
+        
+        const matches = transcript.match(shivaVariations);
+        if (matches) {
+            // If it heard "Shiva Shiva", it counts as 2. If just "Shiva", it counts as 1.
+            registerChant(matches.length);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        debugEl.textContent = "Mic Error: " + event.error;
+      };
+    } else {
+        debugEl.textContent = "Voice Recognition not supported on this browser. Use Spacebar.";
+    }
 
     function speak(text) {
       const u = new SpeechSynthesisUtterance(text);
@@ -63,7 +98,12 @@
       window.speechSynthesis.speak(u);
     }
 
-    function testVoice() { speak("Audio verified."); }
+    function testVoice() { 
+        speak("Audio and Microphone initialized."); 
+        if(recognition) {
+            try { recognition.start(); setTimeout(()=>recognition.stop(), 3000); } catch(e){}
+        }
+    }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
@@ -80,61 +120,66 @@
         const res = await fetch(`${BACKEND_URL}/api/balance/${userWallet}`);
         const data = await res.json();
         document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(4);
-      } catch(e) { console.error("Balance fetch failed", e); }
+      } catch(e) {}
     }
 
     function triggerChallenge() {
       if (!isRunning) return;
-      reqChants = Math.floor(Math.random() * 5) + 1;
+      reqChants = Math.floor(Math.random() * 4) + 2; // Ask for 2 to 5 chants
       curChants = 0;
       challengeActive = true;
       document.getElementById('chant-count').textContent = "";
+      
       speak(`Chant the name Shiva ${reqChants} times.`);
-      document.getElementById('status').textContent = `🙏 CHANT SHIVA ${reqChants} TIMES`;
+      document.getElementById('status').textContent = `🎤 SAY SHIVA ${reqChants} TIMES`;
       document.getElementById('status').className = "bad";
+
+      // Turn on mic listening
+      if(recognition) {
+          try { recognition.start(); } catch(e){} 
+      }
 
       challengeTimer = setTimeout(() => {
         if (challengeActive) {
-          speak("You have failed the test.");
+          speak("You have failed the test. Return to mindfulness.");
           processSessionEnd("Kaptcha Failed");
         }
-      }, 15000);
+      }, 15000); 
     }
 
-    function registerChant() {
+    function registerChant(countAdded) {
       if (!challengeActive || !isRunning) return;
-      curChants++;
-      document.getElementById('chant-count').textContent += "🕉️ ";
       
-      if (curChants === reqChants) {
+      curChants += countAdded;
+      
+      // Update UI with OM symbols based on count
+      let symbols = "";
+      for(let i=0; i<curChants; i++) symbols += "🕉️ ";
+      document.getElementById('chant-count').textContent = symbols;
+      
+      if (curChants >= reqChants) { // Changed to >= so if it double counts, you still pass
         clearTimeout(challengeTimer);
         challengeActive = false;
-        speak("Excellent.");
+        if(recognition) { try { recognition.stop(); } catch(e){} } // Turn off mic
+
+        speak("Excellent. You may continue.");
         document.getElementById('status').textContent = "✅ SUCCESS";
         document.getElementById('status').className = "good";
+        
         setTimeout(() => {
           if(isRunning) {
             document.getElementById('chant-count').textContent = "";
             document.getElementById('status').textContent = "🟢 Session Active";
-            setTimeout(triggerChallenge, (Math.random() * 900000) + 180000);
+            const delay = Math.random() * (900000 - 180000) + 180000;
+            setTimeout(triggerChallenge, delay);
           }
         }, 3000);
-      } else if (curChants > reqChants) {
-          clearTimeout(challengeTimer);
-          speak("Incorrect count.");
-          processSessionEnd("Kaptcha Failed");
       }
     }
 
     async function toggleSession() {
       document.getElementById('status').textContent = "⌛ Booting AI Engine...";
-      
-      try {
-        if (!camera) await initAI();
-      } catch(e) {
-        debugEl.textContent = "FATAL CAMERA ERROR: " + e.message;
-        return;
-      }
+      try { if (!camera) await initAI(); } catch(e) { return; }
       
       try {
         const res = await fetch(`${BACKEND_URL}/api/start-session`, {
@@ -143,8 +188,7 @@
         });
         
         if (res.ok) {
-          isRunning = true; 
-          liveEarned = 0;
+          isRunning = true; liveEarned = 0;
           document.getElementById('start-btn').disabled = true;
           document.getElementById('end-btn').disabled = false;
           
@@ -154,6 +198,7 @@
           
           document.getElementById('status').textContent = "🟢 Session Active";
           document.getElementById('status').className = "good";
+          
           setTimeout(triggerChallenge, 15000);
           
           tickerInterval = setInterval(() => {
@@ -161,17 +206,11 @@
             document.getElementById('live-counter').textContent = liveEarned.toFixed(4);
           }, 100);
         }
-      } catch(e) {
-          document.getElementById('status').textContent = "❌ Server Error";
-      }
+      } catch(e) {}
     }
 
     function onResults(results) {
       if (!isRunning) return;
-      
-      // Heartbeat pulse to prove the AI is actually looping
-      debugEl.textContent = "AI Heartbeat Active: " + new Date().toISOString().split('T')[1];
-
       const now = Date.now();
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
@@ -180,14 +219,15 @@
         const lm = results.multiFaceLandmarks[0];
         
         const ear = (Math.hypot(lm[159].x - lm[145].x, lm[159].y - lm[145].y) + Math.hypot(lm[158].x - lm[153].x, lm[158].y - lm[153].y)) / (2 * Math.hypot(lm[33].x - lm[133].x, lm[33].y - lm[133].y));
-        
         if (ear < 0.18) closedFrameCount++; else closedFrameCount = 0;
         const eyesClosed = closedFrameCount >= 20; 
         
         document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
         document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
         
-        const postureGood = lm[1].y < 0.75; 
+        // ULTRA-LOOSE POSTURE: As long as your face is on the screen, you pass.
+        // 0.95 means your nose is almost at the absolute bottom frame boundary.
+        const postureGood = lm[1].y < 0.95; 
         
         document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
         document.getElementById('spine').className = postureGood ? "good" : "bad";
@@ -196,7 +236,7 @@
         if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
 
         if (eyesOpenTime > 6000 || badPostureTime > 10000) {
-          speak("You have broken the rules.");
+          speak("You have broken the rules of the Sangha.");
           processSessionEnd("Rule Violation");
         }
       } else {
@@ -211,6 +251,7 @@
       clearInterval(tickerInterval);
       clearTimeout(challengeTimer);
       challengeActive = false;
+      if(recognition) { try { recognition.stop(); } catch(e){} } // Ensure mic turns off
       
       const v = document.getElementById('active-video');
       v.src = "pikachu.mp4";
@@ -226,40 +267,24 @@
           });
           document.getElementById('status').innerHTML = `🏁 ${reason}: <span class="good">+${liveEarned.toFixed(4)}</span>`;
           fetchBalance();
-      } catch(e) {
-          document.getElementById('status').textContent = "❌ Save Failed.";
-      }
+      } catch(e) {}
       
       document.getElementById('start-btn').disabled = false;
       document.getElementById('end-btn').disabled = true;
       document.getElementById('chant-count').textContent = "";
-      debugEl.textContent = "System Diagnostics: Session Ended";
     }
 
     async function initAI() {
-      debugEl.textContent = "Initializing FaceMesh...";
       faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}` });
       faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
       faceMesh.onResults(onResults);
       
       const webcam = document.getElementById('hidden-webcam');
-      
       camera = new Camera(webcam, { 
-          onFrame: async () => { 
-            if(isRunning) {
-              try {
-                await faceMesh.send({image: webcam}); 
-              } catch(e) {
-                debugEl.textContent = "AI SEND ERROR: " + e.message;
-              }
-            }
-          },
+          onFrame: async () => { if(isRunning) await faceMesh.send({image: webcam}); },
           width: 640, height: 480
       });
-      
-      debugEl.textContent = "Requesting Camera Permissions...";
       await camera.start();
-      debugEl.textContent = "Camera Active. AI Ready.";
     }
   </script>
 </body>
