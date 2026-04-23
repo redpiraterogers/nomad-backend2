@@ -90,6 +90,7 @@
     .btn:disabled { background: #555; box-shadow: none; cursor: not-allowed; transform: none; }
 
     #wallet-btn { background: #9945FF; color: white; box-shadow: 0 0 20px #9945FF; }
+    #claim-btn { background: #00ffa3; color: #1a0033; box-shadow: 0 0 30px #00ffa3; display: none; }
 
     #metrics { margin-top: 30px; font-size: 1.2em; line-height: 1.7; }
     .good { color: #00ff9d; font-weight: bold; }
@@ -125,6 +126,7 @@
     
     <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
     <button id="end-btn" class="btn" onclick="endSessionManually()" disabled>End Session</button>
+    <button id="claim-btn" class="btn" onclick="claimTokens()">Claim 10+ NOMAD to Wallet</button>
 
     <div id="metrics">
       Stillness: <span id="stillness">0</span>% &nbsp;|&nbsp;
@@ -165,51 +167,74 @@
     const startBtn = document.getElementById('start-btn');
     const endBtn = document.getElementById('end-btn');
     const walletBtn = document.getElementById('wallet-btn');
+    const claimBtn = document.getElementById('claim-btn');
 
-    // === RE-FIXED WALLET CONNECTION ===
+    // === WALLET CONNECTION ===
     async function connectWallet() {
-      console.log("Button clicked. Detecting provider...");
-
-      // 1. Direct check for Phantom
       const provider = window?.phantom?.solana || window?.solana;
-
       if (!provider || !provider.isPhantom) {
-        console.error("Phantom not found in window object.");
-        alert("Phantom Wallet extension not detected. Make sure it's installed and enabled in your browser extensions!");
+        alert("Phantom Wallet not detected!");
         window.open("https://phantom.app/", "_blank");
         return;
       }
-
       try {
         statusEl.textContent = "⏳ Waiting for Phantom approval...";
-        console.log("Calling provider.connect()...");
-        
         const resp = await provider.connect();
         userWallet = resp.publicKey.toString();
-        
-        console.log("Success! Wallet:", userWallet);
-        
-        walletBtn.textContent = "Wallet Connected: " + userWallet.slice(0, 4) + "..." + userWallet.slice(-4);
+        walletBtn.textContent = "Connected: " + userWallet.slice(0, 4) + "..." + userWallet.slice(-4);
         walletBtn.style.backgroundColor = "#00ff9d";
         walletBtn.disabled = true;
         startBtn.disabled = false;
-        
         statusEl.textContent = "🟢 Wallet Connected. Ready to start.";
         fetchBalance();
       } catch (err) {
-        console.error("Connection error:", err);
-        statusEl.textContent = "❌ Connection Denied. Unlock Phantom and try again.";
+        statusEl.textContent = "❌ Connection Denied.";
       }
     }
 
+    // === UPDATED BALANCE FETCH (SMART BUTTON TOGGLE) ===
     async function fetchBalance() {
       try {
         const res = await fetch(`${BACKEND_URL}/api/balance/${userWallet}`);
         const data = await res.json();
+        const balance = data.balance || 0;
         document.getElementById('pool-balance').style.display = 'block';
-        document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(2);
+        document.getElementById('db-balance').textContent = balance.toFixed(2);
+        
+        // Sustainability Rule: Only show claim button if balance is 10+
+        if (balance >= 10) {
+          claimBtn.style.display = 'inline-block';
+        } else {
+          claimBtn.style.display = 'none';
+        }
       } catch (e) {
         console.error("Balance fetch error:", e);
+      }
+    }
+
+    // === CLAIM LOGIC ===
+    async function claimTokens() {
+      if (!userWallet) return;
+      statusEl.textContent = "💎 Contacting Sangha Mint... please wait.";
+      claimBtn.disabled = true;
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/claim`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress: userWallet })
+        });
+        const data = await res.json();
+        if (data.success) {
+          statusEl.innerHTML = `✅ <span style="color:#00ff9d">Success!</span> Minted ${data.minted} NOMAD.<br>Treasury Fee: ${data.fee} NOMAD.`;
+          claimBtn.style.display = 'none';
+          fetchBalance(); 
+        } else {
+          statusEl.textContent = `❌ Claim failed: ${data.error}`;
+          claimBtn.disabled = false;
+        }
+      } catch (err) {
+        statusEl.textContent = "❌ Error reaching the minting server.";
+        claimBtn.disabled = false;
       }
     }
 
@@ -232,7 +257,7 @@
           statusEl.textContent = "❌ Backend refused session. Try refreshing.";
         }
       } catch (err) {
-        statusEl.textContent = "❌ Could not reach Render server. Check your backend status.";
+        statusEl.textContent = "❌ Could not reach Render server.";
       }
     }
 
@@ -241,12 +266,10 @@
       isRunning = false;
       startBtn.disabled = false;
       endBtn.disabled = true;
-      
       buddhaVideo.pause();
       buddhaVideo.classList.remove('glowing');
       buddhaVideo.style.opacity = '0.3';
       statusEl.textContent = "⏳ Verifying session with database...";
-
       try {
         const res = await fetch(`${BACKEND_URL}/api/end-session`, {
           method: 'POST',
@@ -260,14 +283,14 @@
           pikachuVideo.play().catch(() => {});
           if (data.success) {
             statusEl.innerHTML = `🌟 Session Complete!<br>Earned: <span style="color:#00ff9d">+${(data.earned || 0).toFixed(2)} NOMAD</span>`;
-            document.getElementById('db-balance').textContent = (data.newBalance || 0).toFixed(2);
+            fetchBalance();
           } else {
             statusEl.textContent = `⛔ Session Ended — ${reason || data.error}`;
             statusEl.classList.add('violation');
           }
         }, 800);
       } catch (err) {
-        statusEl.textContent = "❌ Error saving session to database.";
+        statusEl.textContent = "❌ Error saving session.";
       }
     }
 
