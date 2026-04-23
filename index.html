@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Shiva Kaptcha</title>
+  <title>Nomad State — Shiva Fixed</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -14,7 +14,9 @@
     #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; }
     #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
-    #metrics { margin-top: 10px; font-size: 1.2em; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; display: inline-block; }
+    .good { color: #00ff9d; }
+    .bad { color: #ff3333; }
+    #metrics { margin-top: 10px; font-size: 1.2em; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 10px; display: inline-block; }
     .chant-display { font-size: 2em; color: #ffd700; margin-top: 10px; min-height: 1.2em; }
   </style>
 </head>
@@ -40,7 +42,7 @@
 
   <br>
   <div id="metrics">
-    Eyes: <span id="eyes">—</span> | Posture: <span id="spine">—</span>
+    Eyes: <span id="eyes" class="bad">AI Loading...</span> | Posture: <span id="spine" class="bad">AI Loading...</span>
   </div>
 
   <script>
@@ -48,8 +50,6 @@
     let isRunning = false, userWallet = null, liveEarned = 0, tickerInterval = null;
     let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
     let poseDetector, faceMesh, camera;
-    
-    // Kaptcha State
     let requiredChants = 0, currentChants = 0, challengeActive = false, challengeTimer = null;
 
     function speak(text) {
@@ -58,7 +58,7 @@
       window.speechSynthesis.speak(u);
     }
 
-    function testVoice() { speak("Shiva. Shiva. The audio is clear."); }
+    function testVoice() { speak("Shiva. The Master is ready."); }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
@@ -81,10 +81,8 @@
       currentChants = 0;
       challengeActive = true;
       document.getElementById('chant-count').textContent = "";
-      
       speak(`Chant the name Shiva ${requiredChants} times.`);
-      statusEl.textContent = `🙏 CHANT SHIVA ${requiredChants} TIMES`;
-
+      document.getElementById('status').textContent = `🙏 CHANT SHIVA ${requiredChants} TIMES`;
       challengeTimer = setTimeout(() => {
         if (challengeActive) {
           speak("You have failed the test.");
@@ -93,7 +91,6 @@
       }, 15000);
     }
 
-    // Input Handling
     function handleKeyPress(e) { if (e.code === "Space") registerChant(); }
     function handleTap() { registerChant(); }
 
@@ -101,25 +98,23 @@
       if (!challengeActive || !isRunning) return;
       currentChants++;
       document.getElementById('chant-count').textContent += "🕉️ ";
-      
       if (currentChants === requiredChants) {
         clearTimeout(challengeTimer);
         challengeActive = false;
         speak("Excellent.");
-        statusEl.textContent = "✅ SUCCESS";
+        document.getElementById('status').textContent = "✅ SUCCESS";
         setTimeout(() => {
           document.getElementById('chant-count').textContent = "";
-          statusEl.textContent = "🟢 Session Active";
-          const delay = Math.random() * (900000 - 180000) + 180000;
-          setTimeout(triggerChantChallenge, delay);
+          document.getElementById('status').textContent = "🟢 Session Active";
+          setTimeout(triggerChantChallenge, (Math.random() * 600000) + 180000);
         }, 3000);
-      } else if (currentChants > requiredChants) {
-        processSessionEnd("Incorrect Count");
       }
     }
 
     async function toggleSession() {
-      if (!camera) await initAI();
+      // FORCE RESTART AI EVERY TIME
+      await initAI();
+      
       const res = await fetch(`${BACKEND_URL}/api/start-session`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ walletAddress: userWallet })
@@ -130,7 +125,7 @@
         document.getElementById('end-btn').disabled = false;
         document.getElementById('active-video').src = "buddha.mp4";
         document.getElementById('active-video').play();
-        statusEl.textContent = "🟢 Session Active";
+        document.getElementById('status').textContent = "🟢 Session Active";
         setTimeout(triggerChantChallenge, 15000);
         tickerInterval = setInterval(() => {
           liveEarned += 0.00018;
@@ -145,35 +140,42 @@
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
 
-      // Eyes
+      // EYE DETECTION
       if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
         const lm = results.multiFaceLandmarks[0];
         const ear = (Math.hypot(lm[160].y-lm[144].y) + Math.hypot(lm[158].y-lm[153].y)) / (2 * Math.hypot(lm[33].x-lm[133].x));
-        if (ear < 0.17) closedFrameCount++; else closedFrameCount = 0;
-        const eyesClosed = (closedFrameCount >= 35); 
-        document.getElementById('eyes').textContent = eyesClosed ? "✅" : "⚠️ OPEN";
-        document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
-        if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
+        let closed = ear < 0.18;
+        if (closed) closedFrameCount++; else closedFrameCount = 0;
+        let finalEyes = closedFrameCount >= 30;
+        
+        document.getElementById('eyes').textContent = finalEyes ? "✅ Closed" : "⚠️ OPEN";
+        document.getElementById('eyes').className = finalEyes ? "good" : "bad";
+        if (!finalEyes) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
       }
 
-      // Posture (Loose: Nose above shoulders)
+      // POSTURE DETECTION
       if (results.poseLandmarks) {
         const nose = results.poseLandmarks[0];
         const ls = results.poseLandmarks[11];
         const rs = results.poseLandmarks[12];
-        const postureGood = nose.y < ((ls.y + rs.y) / 2);
-        document.getElementById('spine').textContent = postureGood ? "✅ Up" : "⚠️ Low";
-        document.getElementById('spine').className = postureGood ? "good" : "bad";
-        if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
+        let up = nose.y < ((ls.y + rs.y) / 2);
+        
+        document.getElementById('spine').textContent = up ? "✅ Up" : "⚠️ Low";
+        document.getElementById('spine').className = up ? "good" : "bad";
+        if (!up) badPostureTime += delta * 1000; else badPostureTime = 0;
       }
 
-      if (eyesOpenTime > 7000 || badPostureTime > 12000) processSessionEnd("Rule Violation");
+      if (eyesOpenTime > 7000 || badPostureTime > 12000) {
+        speak("You have failed the test.");
+        processSessionEnd("Rule Violation");
+      }
     }
 
     async function processSessionEnd(reason) {
       if (!isRunning) return;
       isRunning = false;
       clearInterval(tickerInterval);
+      clearTimeout(challengeTimer);
       document.getElementById('active-video').src = "pikachu.mp4";
       document.getElementById('active-video').play();
       await fetch(`${BACKEND_URL}/api/end-session`, {
@@ -187,12 +189,21 @@
     }
 
     async function initAI() {
+      // CLEANUP OLD CAMERA
+      if (camera) await camera.stop();
+      
       poseDetector = new Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
       faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
       poseDetector.onResults(onResults);
       faceMesh.onResults(onResults);
+      
       const v = document.createElement('video');
-      camera = new Camera(v, { onFrame: async () => { if(isRunning) { await poseDetector.send({image: v}); await faceMesh.send({image: v}); } } });
+      camera = new Camera(v, { onFrame: async () => { 
+        if(isRunning) { 
+          await poseDetector.send({image: v}); 
+          await faceMesh.send({image: v}); 
+        } 
+      } });
       await camera.start();
     }
   </script>
