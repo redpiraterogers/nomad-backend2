@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Voice Kaptcha</title>
+  <title>Nomad State — Unhideable Slider</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
   <style>
@@ -12,21 +12,33 @@
     video.main-vid { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; }
     #hidden-webcam { display: none; } 
     #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; text-transform: uppercase; }
-    #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
+    #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; font-variant-numeric: tabular-nums; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
     .good { color: #00ff9d; font-weight: bold; }
     .bad { color: #ff3333; font-weight: bold; }
     #metrics { margin-top: 10px; font-size: 1.2em; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; display: inline-block; }
-    .chant-display { font-size: 2.5em; height: 1.5em; margin-bottom: 10px; }
-    #ai-debug { font-size: 0.8em; color: #ff00ff; margin-top: 10px; font-family: monospace; }
+    
+    /* UNHIDEABLE SLIDER UI - Moved outside the video */
+    #slider-wrapper {
+      display: none; /* Hidden until Kaptcha starts */
+      margin: 20px auto;
+      padding: 30px;
+      background: #1a0033;
+      border: 4px solid #00ff9d;
+      border-radius: 15px;
+      max-width: 400px;
+      box-shadow: 0 0 30px #00ff9d;
+    }
+    #slider-wrapper p { font-size: 1.5em; font-weight: bold; margin: 0 0 20px 0; color: #fff; }
+    input[type=range] { width: 100%; height: 20px; cursor: pointer; accent-color: #00ff9d; }
   </style>
 </head>
-<body onkeydown="if(event.code==='Space') registerChant(1)" onclick="registerChant(1)">
+<body>
   <h1>🪷 Nomad State</h1>
   <div id="wallet-display" style="font-size:0.8em; opacity:0.6;">Disconnected</div>
   
   <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Wallet</button>
-  <button id="test-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Voice & Mic</button>
+  <button id="test-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Audio</button>
 
   <div style="font-size: 1.1em; margin: 10px;">Total Balance: <span id="db-balance">0.00</span> NOMAD</div>
   <div id="live-counter">0.0000</div>
@@ -36,8 +48,11 @@
     <video id="active-video" class="main-vid" loop muted playsinline></video>
     <video id="hidden-webcam" autoplay playsinline muted></video>
   </div>
-  
-  <div id="chant-count" class="chant-display"></div>
+
+  <div id="slider-wrapper">
+    <p>🧘 Slide to 100% to Center Energy</p>
+    <input type="range" id="zen-slider" min="0" max="100" value="0">
+  </div>
 
   <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
   <button id="end-btn" class="btn" onclick="processSessionEnd('Manual')" disabled>End Session</button>
@@ -46,7 +61,6 @@
   <div id="metrics">
     Eyes: <span id="eyes" class="bad">Waiting...</span> | Posture: <span id="spine" class="bad">Waiting...</span>
   </div>
-  <div id="ai-debug">System Diagnostics: Awaiting Start</div>
 
   <script>
     const BACKEND_URL = "https://nomad-backend-u20g.onrender.com";
@@ -54,36 +68,9 @@
     let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
     let faceMesh, camera;
     
-    let reqChants = 0, curChants = 0, challengeActive = false, challengeTimer = null;
-
-    const debugEl = document.getElementById('ai-debug');
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition = null;
-
-    if (SpeechRecognition) {
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false; 
-      
-      recognition.onresult = (event) => {
-        if (!challengeActive) return;
-        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
-        debugEl.textContent = "Mic Heard: " + transcript;
-
-        const shivaVariations = /shiva|sheva|chiva|sheba|siva|shiba|siba|she wa|see va|shiv|she|sea/gi;
-        const matches = transcript.match(shivaVariations);
-        if (matches) {
-            registerChant(matches.length);
-        }
-      };
-
-      recognition.onerror = (event) => {
-        debugEl.textContent = "Mic Error: " + event.error;
-      };
-    } else {
-        debugEl.textContent = "Voice Recognition not supported on this browser. Use Spacebar.";
-    }
+    // Slider State
+    let challengeActive = false, challengeTimer = null;
+    let violationPaused = false; 
 
     function speak(text) {
       const u = new SpeechSynthesisUtterance(text);
@@ -91,12 +78,7 @@
       window.speechSynthesis.speak(u);
     }
 
-    function testVoice() { 
-        speak("Audio and Microphone initialized."); 
-        if(recognition) {
-            try { recognition.start(); setTimeout(()=>recognition.stop(), 3000); } catch(e){}
-        }
-    }
+    function testVoice() { speak("The Master's audio is ready."); }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
@@ -118,55 +100,55 @@
 
     function triggerChallenge() {
       if (!isRunning) return;
-      reqChants = Math.floor(Math.random() * 4) + 2; 
-      curChants = 0;
-      challengeActive = true;
-      document.getElementById('chant-count').textContent = "";
       
-      speak(`Chant the name Shiva ${reqChants} times.`);
-      document.getElementById('status').textContent = `🎤 SAY SHIVA ${reqChants} TIMES`;
-      document.getElementById('status').className = "bad";
+      violationPaused = true; 
+      speak("Center your energy.");
+      document.getElementById('status').textContent = "🧘 PREPARING...";
+      document.getElementById('status').className = "";
 
-      if(recognition) {
-          try { recognition.start(); } catch(e){} 
-      }
-
-      challengeTimer = setTimeout(() => {
-        if (challengeActive) {
-          speak("You have failed the test. Return to mindfulness.");
-          processSessionEnd("Kaptcha Failed");
-        }
-      }, 15000); 
+      setTimeout(() => {
+        if(!isRunning) return;
+        
+        // Show the massive slider wrapper below the video
+        document.getElementById('slider-wrapper').style.display = "block";
+        document.getElementById('zen-slider').value = 0;
+        document.getElementById('status').textContent = "👉 DRAG SLIDER TO 100%";
+        document.getElementById('status').className = "bad";
+        
+        challengeActive = true;
+        
+        challengeTimer = setTimeout(() => {
+          if (challengeActive) {
+            speak("You have lost focus.");
+            processSessionEnd("Slider Timeout");
+          }
+        }, 15000); 
+      }, 2000); 
     }
 
-    function registerChant(countAdded) {
+    document.getElementById('zen-slider').addEventListener('input', function() {
       if (!challengeActive || !isRunning) return;
       
-      curChants += countAdded;
-      
-      let symbols = "";
-      for(let i=0; i<curChants; i++) symbols += "🕉️ ";
-      document.getElementById('chant-count').textContent = symbols;
-      
-      if (curChants >= reqChants) { 
+      if (this.value == 100) {
         clearTimeout(challengeTimer);
         challengeActive = false;
-        if(recognition) { try { recognition.stop(); } catch(e){} } 
-
-        speak("Excellent. You may continue.");
-        document.getElementById('status').textContent = "✅ SUCCESS";
-        document.getElementById('status').className = "good";
+        document.getElementById('slider-wrapper').style.display = "none";
         
+        document.getElementById('status').textContent = "✅ ENERGY BALANCED";
+        document.getElementById('status').className = "good";
+        speak("Excellent.");
+
         setTimeout(() => {
           if(isRunning) {
-            document.getElementById('chant-count').textContent = "";
             document.getElementById('status').textContent = "🟢 Session Active";
+            violationPaused = false; 
+            
             const delay = Math.random() * (900000 - 180000) + 180000;
             setTimeout(triggerChallenge, delay);
           }
-        }, 3000);
+        }, 2000);
       }
-    }
+    });
 
     async function toggleSession() {
       document.getElementById('status').textContent = "⌛ Booting AI Engine...";
@@ -179,7 +161,10 @@
         });
         
         if (res.ok) {
-          isRunning = true; liveEarned = 0;
+          isRunning = true; 
+          liveEarned = 0;
+          violationPaused = false; 
+          
           document.getElementById('start-btn').disabled = true;
           document.getElementById('end-btn').disabled = false;
           
@@ -221,13 +206,19 @@
         document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
         document.getElementById('spine').className = postureGood ? "good" : "bad";
 
-        if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
-        if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
+        if (!violationPaused) {
+            if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
+            if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
 
-        if (eyesOpenTime > 6000 || badPostureTime > 10000) {
-          speak("You have broken the rules of the Sangha.");
-          processSessionEnd("Rule Violation");
+            if (eyesOpenTime > 6000 || badPostureTime > 10000) {
+              speak("You have broken the rules of the Sangha.");
+              processSessionEnd("Rule Violation");
+            }
+        } else {
+            eyesOpenTime = 0;
+            badPostureTime = 0;
         }
+
       } else {
          document.getElementById('eyes').textContent = "❓ Face Lost";
          document.getElementById('spine').textContent = "❓ Face Lost";
@@ -240,7 +231,8 @@
       clearInterval(tickerInterval);
       clearTimeout(challengeTimer);
       challengeActive = false;
-      if(recognition) { try { recognition.stop(); } catch(e){} } 
+      violationPaused = false;
+      document.getElementById('slider-wrapper').style.display = "none";
       
       const v = document.getElementById('active-video');
       v.src = "pikachu.mp4";
@@ -260,7 +252,6 @@
       
       document.getElementById('start-btn').disabled = false;
       document.getElementById('end-btn').disabled = true;
-      document.getElementById('chant-count').textContent = "";
     }
 
     async function initAI() {
