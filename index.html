@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Mindful Slider</title>
+  <title>Nomad State — Voice Kaptcha</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
   <style>
@@ -12,38 +12,21 @@
     video.main-vid { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; }
     #hidden-webcam { display: none; } 
     #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; text-transform: uppercase; }
-    #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; font-variant-numeric: tabular-nums; }
+    #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
     .good { color: #00ff9d; font-weight: bold; }
     .bad { color: #ff3333; font-weight: bold; }
     #metrics { margin-top: 10px; font-size: 1.2em; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; display: inline-block; }
-    
-    /* SLIDER UI */
-    #slider-container {
-      display: none;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: 20;
-      background: rgba(10, 10, 31, 0.9);
-      padding: 30px;
-      border-radius: 20px;
-      border: 2px solid #00ff9d;
-      box-shadow: 0 0 20px rgba(0, 255, 157, 0.5);
-      width: 70%;
-      max-width: 300px;
-    }
-    #slider-container p { margin: 0 0 15px 0; font-weight: bold; font-size: 1.2em; color: #fff; }
-    input[type=range] { width: 100%; cursor: pointer; height: 10px; accent-color: #00ff9d; }
+    .chant-display { font-size: 2.5em; height: 1.5em; margin-bottom: 10px; }
+    #ai-debug { font-size: 0.8em; color: #ff00ff; margin-top: 10px; font-family: monospace; }
   </style>
 </head>
-<body>
+<body onkeydown="if(event.code==='Space') registerChant(1)" onclick="registerChant(1)">
   <h1>🪷 Nomad State</h1>
   <div id="wallet-display" style="font-size:0.8em; opacity:0.6;">Disconnected</div>
   
   <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Wallet</button>
-  <button id="test-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Audio</button>
+  <button id="test-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Voice & Mic</button>
 
   <div style="font-size: 1.1em; margin: 10px;">Total Balance: <span id="db-balance">0.00</span> NOMAD</div>
   <div id="live-counter">0.0000</div>
@@ -52,12 +35,9 @@
   <div id="visual-area">
     <video id="active-video" class="main-vid" loop muted playsinline></video>
     <video id="hidden-webcam" autoplay playsinline muted></video>
-    
-    <div id="slider-container">
-      <p>Slide to Center Energy</p>
-      <input type="range" id="zen-slider" min="0" max="100" value="0">
-    </div>
   </div>
+  
+  <div id="chant-count" class="chant-display"></div>
 
   <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
   <button id="end-btn" class="btn" onclick="processSessionEnd('Manual')" disabled>End Session</button>
@@ -66,6 +46,7 @@
   <div id="metrics">
     Eyes: <span id="eyes" class="bad">Waiting...</span> | Posture: <span id="spine" class="bad">Waiting...</span>
   </div>
+  <div id="ai-debug">System Diagnostics: Awaiting Start</div>
 
   <script>
     const BACKEND_URL = "https://nomad-backend-u20g.onrender.com";
@@ -73,453 +54,26 @@
     let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
     let faceMesh, camera;
     
-    // Slider State
-    let challengeActive = false, challengeTimer = null;
-    let violationPaused = false; // Controls the 2-second buffers
+    let reqChants = 0, curChants = 0, challengeActive = false, challengeTimer = null;
 
-    function speak(text) {
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 0.85; u.pitch = 0.6;
-      window.speechSynthesis.speak(u);
-    }
+    const debugEl = document.getElementById('ai-debug');
 
-    function testVoice() { speak("The Master's audio is ready."); }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
 
-    async function connectWallet() {
-      const provider = window?.phantom?.solana || window?.solana;
-      if (!provider) return alert("Phantom wallet not found!");
-      const resp = await provider.connect();
-      userWallet = resp.publicKey.toString();
-      document.getElementById('wallet-display').textContent = userWallet;
-      document.getElementById('start-btn').disabled = false;
-      fetchBalance();
-    }
-
-    async function fetchBalance() {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/balance/${userWallet}`);
-        const data = await res.json();
-        document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(4);
-      } catch(e) {}
-    }
-
-    // --- NEW SLIDER CHALLENGE LOGIC ---
-    function triggerChallenge() {
-      if (!isRunning) return;
-      
-      // Step 1: Pause violations and give a 2-second warning buffer
-      violationPaused = true; 
-      speak("Center your energy.");
-      document.getElementById('status').textContent = "🧘 PREPARING...";
-      document.getElementById('status').className = "";
-
-      setTimeout(() => {
-        if(!isRunning) return;
-        
-        // Step 2: Show Slider & Start Countdown
-        document.getElementById('slider-container').style.display = "block";
-        document.getElementById('zen-slider').value = 0;
-        document.getElementById('status').textContent = "👉 DRAG SLIDER TO 100%";
-        document.getElementById('status').className = "bad";
-        
-        challengeActive = true;
-        
-        challengeTimer = setTimeout(() => {
-          if (challengeActive) {
-            speak("You have lost focus.");
-            processSessionEnd("Slider Timeout");
-          }
-        }, 15000); // 15 seconds to drag the slider
-      }, 2000); // The 2-second "Before" Buffer
-    }
-
-    // Slider Event Listener
-    document.getElementById('zen-slider').addEventListener('input', function() {
-      if (!challengeActive || !isRunning) return;
-      
-      if (this.value == 100) {
-        // Success!
-        clearTimeout(challengeTimer);
-        challengeActive = false;
-        document.getElementById('slider-container').style.display = "none";
-        
-        document.getElementById('status').textContent = "✅ ENERGY BALANCED";
-        document.getElementById('status').className = "good";
-        speak("Excellent.");
-
-        // Step 3: The 2-second "After" Buffer to close eyes again
-        setTimeout(() => {
-          if(isRunning) {
-            document.getElementById('status').textContent = "🟢 Session Active";
-            violationPaused = false; // Violations re-activated!
-            
-            // Schedule next challenge (3 to 15 mins)
-            const delay = Math.random() * (900000 - 180000) + 180000;
-            setTimeout(triggerChallenge, delay);
-          }
-        }, 2000);
-      }
-    });
-
-    async function toggleSession() {
-      document.getElementById('status').textContent = "⌛ Booting AI Engine...";
-      try { if (!camera) await initAI(); } catch(e) { return; }
-      
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/start-session`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ walletAddress: userWallet })
-        });
-        
-        if (res.ok) {
-          isRunning = true; 
-          liveEarned = 0;
-          violationPaused = false; // Make sure rules are active to start
-          
-          document.getElementById('start-btn').disabled = true;
-          document.getElementById('end-btn').disabled = false;
-          
-          const v = document.getElementById('active-video');
-          v.src = "buddha.mp4";
-          v.play();
-          
-          document.getElementById('status').textContent = "🟢 Session Active";
-          document.getElementById('status').className = "good";
-          
-          // First check at 15 seconds
-          setTimeout(triggerChallenge, 15000);
-          
-          tickerInterval = setInterval(() => {
-            liveEarned += 0.00018;
-            document.getElementById('live-counter').textContent = liveEarned.toFixed(4);
-          }, 100);
-        }
-      } catch(e) {}
-    }
-
-    function onResults(results) {
-      if (!isRunning) return;
-      const now = Date.now();
-      const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
-      lastFrameTime = now;
-
-      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-        const lm = results.multiFaceLandmarks[0];
-        
-        const ear = (Math.hypot(lm[159].x - lm[145].x, lm[159].y - lm[145].y) + Math.hypot(lm[158].x - lm[153].x, lm[158].y - lm[153].y)) / (2 * Math.hypot(lm[33].x - lm[133].x, lm[33].y - lm[133].y));
-        if (ear < 0.18) closedFrameCount++; else closedFrameCount = 0;
-        const eyesClosed = closedFrameCount >= 20; 
-        
-        document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
-        document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
-        
-        // Ultra-loose posture: nose can go almost to the bottom of the frame
-        const postureGood = lm[1].y < 0.95; 
-        
-        document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
-        document.getElementById('spine').className = postureGood ? "good" : "bad";
-
-        // ONLY add to violation timers if the Kaptcha buffers are NOT active
-        if (!violationPaused) {
-            if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
-            if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
-
-            if (eyesOpenTime > 6000 || badPostureTime > 10000) {
-              speak("You have broken the rules of the Sangha.");
-              processSessionEnd("Rule Violation");
-            }
-        } else {
-            // While Kaptcha/Buffers are active, reset timers so they don't trigger
-            eyesOpenTime = 0;
-            badPostureTime = 0;
-        }
-
-      } else {
-         document.getElementById('eyes').textContent = "❓ Face Lost";
-         document.getElementById('spine').textContent = "❓ Face Lost";
-      }
-    }
-
-    async function processSessionEnd(reason) {
-      if (!isRunning) return;
-      isRunning = false;
-      clearInterval(tickerInterval);
-      clearTimeout(challengeTimer);
-      challengeActive = false;
-      violationPaused = false;
-      document.getElementById('slider-container').style.display = "none";
-      
-      const v = document.getElementById('active-video');
-      v.src = "pikachu.mp4";
-      v.play();
-      
-      document.getElementById('status').textContent = "⌛ Syncing...";
-      document.getElementById('status').className = "";
-
-      try {
-          await fetch(`${BACKEND_URL}/api/end-session`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ walletAddress: userWallet, earnedAmount: liveEarned })
-          });
-          document.getElementById('status').innerHTML = `🏁 ${reason}: <span class="good">+${liveEarned.toFixed(4)}</span>`;
-          fetchBalance();
-      } catch(e) {}
-      
-      document.getElementById('start-btn').disabled = false;
-      document.getElementById('end-btn').disabled = true;
-    }
-
-    async function initAI() {
-      faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}` });
-      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-      faceMesh.onResults(onResults);
-      
-      const webcam = document.getElementById('hidden-webcam');
-      camera = new Camera(webcam, { 
-          onFrame: async () => { if(isRunning) await faceMesh.send({image: webcam}); },
-          width: 640, height: 480
-      });
-      await camera.start();
-    }
-  </script>
-</body>
-</html>    Eyes: <span id="eyes" class="bad">Waiting...</span> | Posture: <span id="spine" class="bad">Waiting...</span>
-  </div>
-
-  <script>
-    const BACKEND_URL = "https://nomad-backend-u20g.onrender.com";
-    let isRunning = false, userWallet = null, liveEarned = 0, tickerInterval = null;
-    let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
-    let faceMesh, camera;
-    
-    // Slider State
-    let challengeActive = false, challengeTimer = null;
-    let violationPaused = false; // Controls the 2-second buffers
-
-    function speak(text) {
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 0.85; u.pitch = 0.6;
-      window.speechSynthesis.speak(u);
-    }
-
-    function testVoice() { speak("The Master's audio is ready."); }
-
-    async function connectWallet() {
-      const provider = window?.phantom?.solana || window?.solana;
-      if (!provider) return alert("Phantom wallet not found!");
-      const resp = await provider.connect();
-      userWallet = resp.publicKey.toString();
-      document.getElementById('wallet-display').textContent = userWallet;
-      document.getElementById('start-btn').disabled = false;
-      fetchBalance();
-    }
-
-    async function fetchBalance() {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/balance/${userWallet}`);
-        const data = await res.json();
-        document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(4);
-      } catch(e) {}
-    }
-
-    // --- NEW SLIDER CHALLENGE LOGIC ---
-    function triggerChallenge() {
-      if (!isRunning) return;
-      
-      // Step 1: Pause violations and give a 2-second warning buffer
-      violationPaused = true; 
-      speak("Center your energy.");
-      document.getElementById('status').textContent = "🧘 PREPARING...";
-      document.getElementById('status').className = "";
-
-      setTimeout(() => {
-        if(!isRunning) return;
-        
-        // Step 2: Show Slider & Start Countdown
-        document.getElementById('slider-container').style.display = "block";
-        document.getElementById('zen-slider').value = 0;
-        document.getElementById('status').textContent = "👉 DRAG SLIDER TO 100%";
-        document.getElementById('status').className = "bad";
-        
-        challengeActive = true;
-        
-        challengeTimer = setTimeout(() => {
-          if (challengeActive) {
-            speak("You have lost focus.");
-            processSessionEnd("Slider Timeout");
-          }
-        }, 15000); // 15 seconds to drag the slider
-      }, 2000); // The 2-second "Before" Buffer
-    }
-
-    // Slider Event Listener
-    document.getElementById('zen-slider').addEventListener('input', function() {
-      if (!challengeActive || !isRunning) return;
-      
-      if (this.value == 100) {
-        // Success!
-        clearTimeout(challengeTimer);
-        challengeActive = false;
-        document.getElementById('slider-container').style.display = "none";
-        
-        document.getElementById('status').textContent = "✅ ENERGY BALANCED";
-        document.getElementById('status').className = "good";
-        speak("Excellent.");
-
-        // Step 3: The 2-second "After" Buffer to close eyes again
-        setTimeout(() => {
-          if(isRunning) {
-            document.getElementById('status').textContent = "🟢 Session Active";
-            violationPaused = false; // Violations re-activated!
-            
-            // Schedule next challenge (3 to 15 mins)
-            const delay = Math.random() * (900000 - 180000) + 180000;
-            setTimeout(triggerChallenge, delay);
-          }
-        }, 2000);
-      }
-    });
-
-    async function toggleSession() {
-      document.getElementById('status').textContent = "⌛ Booting AI Engine...";
-      try { if (!camera) await initAI(); } catch(e) { return; }
-      
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/start-session`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ walletAddress: userWallet })
-        });
-        
-        if (res.ok) {
-          isRunning = true; 
-          liveEarned = 0;
-          violationPaused = false; // Make sure rules are active to start
-          
-          document.getElementById('start-btn').disabled = true;
-          document.getElementById('end-btn').disabled = false;
-          
-          const v = document.getElementById('active-video');
-          v.src = "buddha.mp4";
-          v.play();
-          
-          document.getElementById('status').textContent = "🟢 Session Active";
-          document.getElementById('status').className = "good";
-          
-          // First check at 15 seconds
-          setTimeout(triggerChallenge, 15000);
-          
-          tickerInterval = setInterval(() => {
-            liveEarned += 0.00018;
-            document.getElementById('live-counter').textContent = liveEarned.toFixed(4);
-          }, 100);
-        }
-      } catch(e) {}
-    }
-
-    function onResults(results) {
-      if (!isRunning) return;
-      const now = Date.now();
-      const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
-      lastFrameTime = now;
-
-      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-        const lm = results.multiFaceLandmarks[0];
-        
-        const ear = (Math.hypot(lm[159].x - lm[145].x, lm[159].y - lm[145].y) + Math.hypot(lm[158].x - lm[153].x, lm[158].y - lm[153].y)) / (2 * Math.hypot(lm[33].x - lm[133].x, lm[33].y - lm[133].y));
-        if (ear < 0.18) closedFrameCount++; else closedFrameCount = 0;
-        const eyesClosed = closedFrameCount >= 20; 
-        
-        document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
-        document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
-        
-        // Ultra-loose posture: nose can go almost to the bottom of the frame
-        const postureGood = lm[1].y < 0.95; 
-        
-        document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
-        document.getElementById('spine').className = postureGood ? "good" : "bad";
-
-        // ONLY add to violation timers if the Kaptcha buffers are NOT active
-        if (!violationPaused) {
-            if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
-            if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
-
-            if (eyesOpenTime > 6000 || badPostureTime > 10000) {
-              speak("You have broken the rules of the Sangha.");
-              processSessionEnd("Rule Violation");
-            }
-        } else {
-            // While Kaptcha/Buffers are active, reset timers so they don't trigger
-            eyesOpenTime = 0;
-            badPostureTime = 0;
-        }
-
-      } else {
-         document.getElementById('eyes').textContent = "❓ Face Lost";
-         document.getElementById('spine').textContent = "❓ Face Lost";
-      }
-    }
-
-    async function processSessionEnd(reason) {
-      if (!isRunning) return;
-      isRunning = false;
-      clearInterval(tickerInterval);
-      clearTimeout(challengeTimer);
-      challengeActive = false;
-      violationPaused = false;
-      document.getElementById('slider-container').style.display = "none";
-      
-      const v = document.getElementById('active-video');
-      v.src = "pikachu.mp4";
-      v.play();
-      
-      document.getElementById('status').textContent = "⌛ Syncing...";
-      document.getElementById('status').className = "";
-
-      try {
-          await fetch(`${BACKEND_URL}/api/end-session`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ walletAddress: userWallet, earnedAmount: liveEarned })
-          });
-          document.getElementById('status').innerHTML = `🏁 ${reason}: <span class="good">+${liveEarned.toFixed(4)}</span>`;
-          fetchBalance();
-      } catch(e) {}
-      
-      document.getElementById('start-btn').disabled = false;
-      document.getElementById('end-btn').disabled = true;
-    }
-
-    async function initAI() {
-      faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}` });
-      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-      faceMesh.onResults(onResults);
-      
-      const webcam = document.getElementById('hidden-webcam');
-      camera = new Camera(webcam, { 
-          onFrame: async () => { if(isRunning) await faceMesh.send({image: webcam}); },
-          width: 640, height: 480
-      });
-      await camera.start();
-    }
-  </script>
-</body>
-</html>    if (SpeechRecognition) {
+    if (SpeechRecognition) {
       recognition = new SpeechRecognition();
       recognition.continuous = true;
-      recognition.interimResults = false; // Only triggers when you pause speaking
+      recognition.interimResults = false; 
       
       recognition.onresult = (event) => {
         if (!challengeActive) return;
-        
-        // Get the latest word spoken
         const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
         debugEl.textContent = "Mic Heard: " + transcript;
 
-        // FUZZY DICTIONARY: All the ways the browser might mishear "Shiva"
         const shivaVariations = /shiva|sheva|chiva|sheba|siva|shiba|siba|she wa|see va|shiv|she|sea/gi;
-        
         const matches = transcript.match(shivaVariations);
         if (matches) {
-            // If it heard "Shiva Shiva", it counts as 2. If just "Shiva", it counts as 1.
             registerChant(matches.length);
         }
       };
@@ -564,7 +118,7 @@
 
     function triggerChallenge() {
       if (!isRunning) return;
-      reqChants = Math.floor(Math.random() * 4) + 2; // Ask for 2 to 5 chants
+      reqChants = Math.floor(Math.random() * 4) + 2; 
       curChants = 0;
       challengeActive = true;
       document.getElementById('chant-count').textContent = "";
@@ -573,7 +127,6 @@
       document.getElementById('status').textContent = `🎤 SAY SHIVA ${reqChants} TIMES`;
       document.getElementById('status').className = "bad";
 
-      // Turn on mic listening
       if(recognition) {
           try { recognition.start(); } catch(e){} 
       }
@@ -591,15 +144,14 @@
       
       curChants += countAdded;
       
-      // Update UI with OM symbols based on count
       let symbols = "";
       for(let i=0; i<curChants; i++) symbols += "🕉️ ";
       document.getElementById('chant-count').textContent = symbols;
       
-      if (curChants >= reqChants) { // Changed to >= so if it double counts, you still pass
+      if (curChants >= reqChants) { 
         clearTimeout(challengeTimer);
         challengeActive = false;
-        if(recognition) { try { recognition.stop(); } catch(e){} } // Turn off mic
+        if(recognition) { try { recognition.stop(); } catch(e){} } 
 
         speak("Excellent. You may continue.");
         document.getElementById('status').textContent = "✅ SUCCESS";
@@ -664,8 +216,6 @@
         document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
         document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
         
-        // ULTRA-LOOSE POSTURE: As long as your face is on the screen, you pass.
-        // 0.95 means your nose is almost at the absolute bottom frame boundary.
         const postureGood = lm[1].y < 0.95; 
         
         document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
@@ -690,7 +240,7 @@
       clearInterval(tickerInterval);
       clearTimeout(challengeTimer);
       challengeActive = false;
-      if(recognition) { try { recognition.stop(); } catch(e){} } // Ensure mic turns off
+      if(recognition) { try { recognition.stop(); } catch(e){} } 
       
       const v = document.getElementById('active-video');
       v.src = "pikachu.mp4";
