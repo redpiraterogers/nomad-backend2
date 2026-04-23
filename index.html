@@ -7,92 +7,128 @@
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
     <style>
         :root { --gold: #ffd700; --bg: #050505; }
-        body { margin: 0; background: var(--bg); color: #e0e0e0; font-family: 'Inter', sans-serif; }
+        body { margin: 0; background: var(--bg); color: #e0e0e0; font-family: 'Inter', sans-serif; overflow: hidden; }
         .view { display: none; min-height: 100vh; flex-direction: column; align-items: center; justify-content: center; }
         .active { display: flex; }
-        .banner { background: var(--gold); color: #000; padding: 10px; width: 100%; position: fixed; top: 0; text-align: center; font-weight: 900; z-index: 100; }
-        #display-stack { width: 640px; height: 480px; border: 4px solid #222; position: relative; border-radius: 20px; overflow: hidden; }
-        video { width: 100%; height: 100%; transform: scaleX(-1); opacity: 0.4; }
-        .btn { padding: 15px 30px; background: var(--gold); border: none; font-weight: 900; cursor: pointer; border-radius: 50px; text-transform: uppercase; margin: 10px; }
-        .sutra-box { max-width: 600px; padding: 40px; border-left: 2px solid var(--gold); font-style: italic; color: #aaa; }
+        .banner { background: var(--gold); color: #000; padding: 10px; width: 100%; position: fixed; top: 0; text-align: center; font-weight: 900; z-index: 1000; letter-spacing: 2px; }
+        
+        #display-stack { width: 640px; height: 480px; border: 4px solid #1a1a1a; position: relative; border-radius: 20px; overflow: hidden; background: #000; }
+        video, #feedback-video { position: absolute; width: 100%; height: 100%; top: 0; left: 0; object-fit: cover; }
+        #webcam { transform: scaleX(-1); opacity: 0.15; z-index: 1; }
+        #feedback-video { z-index: 2; opacity: 0.8; }
+        
+        #status-overlay { position: absolute; top: 40%; width: 100%; text-align: center; font-family: 'Cinzel', serif; font-size: 2.5rem; font-weight: 900; z-index: 10; text-shadow: 0 0 20px #000; }
+        .dashboard { background: #0a0a0a; padding: 30px; border-radius: 24px; border: 1px solid #222; text-align: center; min-width: 420px; margin-top: 20px; }
+        .btn { padding: 15px 35px; background: var(--gold); border: none; font-weight: 900; cursor: pointer; border-radius: 50px; text-transform: uppercase; margin: 10px; }
     </style>
 </head>
 <body>
 
-<div class="banner">UNITS UNLOCKING IN: <span id="timer">24:00:00</span></div>
+<div class="banner">STILLNESS LEDGER ACTIVE | UNLOCKING: <span id="timer">24:00:00</span></div>
 
 <section id="view-landing" class="view active">
-    <h1 style="font-family: 'Cinzel'; color: var(--gold);">THE STILLNESS PROTOCOL</h1>
-    <p style="color: #666; max-width: 500px; text-align: center;">Verified human attention. The first currency backed by the silence of the soul.</p>
-    <div>
-        <button class="btn" onclick="showView('view-session'); initAI();">Start Holding Still</button>
-        <button class="btn" style="background: transparent; border: 1px solid #444; color: #fff;" onclick="showView('view-sutra')">Read Whitepaper</button>
+    <h1 style="font-family:'Cinzel'; color:var(--gold); font-size:3.5rem;">THE STILLNESS PROTOCOL</h1>
+    <div class="btn-group">
+        <button class="btn" onclick="switchView('view-session'); startVigil();">Begin Session</button>
+        <button class="btn" style="background:transparent; border:1px solid #444; color:#fff;" onclick="switchView('view-sutra')">Sutra</button>
     </div>
 </section>
 
 <section id="view-sutra" class="view">
-    <div class="sutra-box">
-        <h2>THE SUTRA</h2>
-        <p>"A coin minted by a machine is a machine's coin. A coin minted by a meditating human is a human's coin." [cite: 30, 31]</p>
-        <p>"Seven hours is the Sacrament. The number marks completion — the arrival at a new octave." [cite: 41, 45]</p>
+    <div style="max-width:600px; line-height:1.8; color:#aaa; border-left: 1px solid var(--gold); padding-left: 30px;">
+        <h2 style="font-family:'Cinzel'; color:var(--gold);">THE SUTRA</h2>
+        <p>"Time spent in stillness is never lost. It is crystallized into the protocol."</p>
+        <button class="btn" onclick="window.location.href='nomadic-whitepaper.pdf'">Download PDF</button>
     </div>
-    <button class="btn" onclick="showView('view-landing')">Back</button>
+    <button class="btn" style="background:#222; color:#fff; margin-top:30px;" onclick="switchView('view-landing')">Back</button>
 </section>
 
 <section id="view-session" class="view">
     <div id="display-stack">
         <video id="webcam" autoplay playsinline></video>
-        <div id="status" style="position: absolute; top: 45%; width: 100%; text-align: center; font-size: 2rem; font-weight: 900;">AWAITING AI...</div>
+        <video id="feedback-video" autoplay loop muted></video>
+        <div id="status-overlay">AWAITING PRESENCE</div>
     </div>
-    <div id="points" style="font-size: 3rem; color: var(--gold); margin-top: 20px;">0.00 $STILL</div>
+    <div class="dashboard">
+        <div id="points" style="font-size:3.5rem; color:var(--gold); font-weight:900;">0.00 $STILL</div>
+        <div id="violation-info" style="color:#ff4444; font-weight:bold; visibility:hidden;">VIOLATION: <span id="violation-clock">12</span>s</div>
+    </div>
 </section>
 
 <script>
-    let timeLeft = 86400; // 24 hours
+    let timeLeft = 86400;
     setInterval(() => {
         let h = Math.floor(timeLeft / 3600);
         let m = Math.floor((timeLeft % 3600) / 60);
         let s = timeLeft % 60;
-        document.getElementById('timer').innerText = `${h}:${m}:${s}`;
+        document.getElementById('timer').innerText = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
         if (timeLeft > 0) timeLeft--;
     }, 1000);
 
-    function showView(id) {
+    function switchView(id) {
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
         document.getElementById(id).classList.add('active');
     }
 
-    async function initAI() {
+    async function startVigil() {
         const video = document.getElementById('webcam');
-        const status = document.getElementById('status');
+        const feedback = document.getElementById('feedback-video');
+        const status = document.getElementById('status-overlay');
+        const vClock = document.getElementById('violation-clock');
+        const vInfo = document.getElementById('violation-info');
+        
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
 
         const detector = await faceLandmarksDetection.createDetector(
-            faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-            { runtime: 'tfjs' }
+            faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh, { runtime: 'tfjs' }
         );
 
-        let violationTime = 0;
+        let violationStartTime = null;
         let points = 0;
+        let sessionActive = true;
+        const synth = window.speechSynthesis;
 
-        setInterval(async () => {
+        const loop = setInterval(async () => {
+            if (!sessionActive) return;
+
             const faces = await detector.estimateFaces(video);
             if (faces.length > 0) {
                 const kp = faces[0].keypoints;
-                const eyeGap = Math.abs(kp[159].y - kp[145].y); // EYES
-                const noseX = kp[1].x; // POSTURE
+                const eyeGap = Math.abs(kp[159].y - kp[145].y);
+                const noseY = kp[1].y; 
+                
+                // MANDATE: Eyes closed AND Head above shoulders (Y-axis check)
+                const isCompliant = (eyeGap < 3.8 && noseY < 250);
 
-                if (eyeGap < 3.8 && noseX > 200 && noseX < 440) {
-                    violationTime = 0;
-                    points += 0.01;
+                if (isCompliant) {
+                    violationStartTime = null;
+                    vInfo.style.visibility = "hidden";
+                    points += 0.05;
                     status.innerText = "STILLNESS ACTIVE";
                     status.style.color = "var(--gold)";
+                    if (!feedback.src.includes('blue.mp4')) feedback.src = 'blue.mp4';
                 } else {
-                    violationTime += 0.2;
-                    status.innerText = "VIOLATION DETECTED";
+                    if (!violationStartTime) violationStartTime = Date.now();
+                    const elapsed = (Date.now() - violationStartTime) / 1000;
+                    const remaining = Math.max(0, Math.ceil(12 - elapsed));
+                    
+                    vInfo.style.visibility = "visible";
+                    vClock.innerText = remaining;
+                    status.innerText = "MANDATE VIOLATION";
                     status.style.color = "red";
-                    if (violationTime >= 50) location.reload(); // TERMINATE
+                    if (!feedback.src.includes('red.mp4')) feedback.src = 'red.mp4';
+
+                    if (elapsed >= 12) {
+                        sessionActive = false;
+                        status.innerText = "SESSION SEALED";
+                        status.style.color = "white";
+                        feedback.pause();
+                        const utter = new SpeechSynthesisUtterance("Session terminated. Final accumulation recorded.");
+                        synth.speak(utter);
+                        clearInterval(loop);
+                        // The user keeps their points! No reload.
+                    }
                 }
                 document.getElementById('points').innerText = points.toFixed(2) + " $STILL";
             }
