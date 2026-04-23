@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Optimized Sangha</title>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <title>Nomad State — Bulletproof AI</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
   <style>
     body { font-family: system-ui, sans-serif; background: #0a0a1f; color: #e0d4ff; text-align: center; margin: 0; padding: 20px; }
     #visual-area { width: 100%; max-width: 640px; height: 360px; margin: 20px auto; border-radius: 20px; background: #000; overflow: hidden; border: 3px solid #ffd700; position: relative; }
-    video { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; }
+    video.main-vid { width: 100%; height: 100%; object-fit: cover; position: absolute; top:0; left:0; z-index: 5; }
+    #hidden-webcam { display: none; } /* Physically in the HTML, but invisible to user */
     #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; text-transform: uppercase; }
     #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
@@ -17,6 +18,7 @@
     .bad { color: #ff3333; font-weight: bold; }
     #metrics { margin-top: 10px; font-size: 1.2em; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; display: inline-block; }
     .chant-display { font-size: 2.5em; height: 1.5em; margin-bottom: 10px; }
+    #ai-debug { font-size: 0.8em; color: #ff00ff; margin-top: 10px; font-family: monospace; }
   </style>
 </head>
 <body onkeydown="if(event.code==='Space') registerChant()" onclick="registerChant()">
@@ -31,7 +33,8 @@
   <div id="status">Ready to Begin</div>
 
   <div id="visual-area">
-    <video id="active-video" loop muted playsinline></video>
+    <video id="active-video" class="main-vid" loop muted playsinline></video>
+    <video id="hidden-webcam" autoplay playsinline muted></video>
   </div>
   
   <div id="chant-count" class="chant-display"></div>
@@ -41,17 +44,18 @@
 
   <br>
   <div id="metrics">
-    Eyes: <span id="eyes" class="bad">Waiting for Camera...</span> | Posture: <span id="spine" class="bad">Waiting for Camera...</span>
+    Eyes: <span id="eyes" class="bad">Waiting...</span> | Posture: <span id="spine" class="bad">Waiting...</span>
   </div>
+  <div id="ai-debug">System Diagnostics: Awaiting Start</div>
 
   <script>
     const BACKEND_URL = "https://nomad-backend-u20g.onrender.com";
     let isRunning = false, userWallet = null, liveEarned = 0, tickerInterval = null;
     let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
     let faceMesh, camera;
-    
-    // Kaptcha State
     let reqChants = 0, curChants = 0, challengeActive = false, challengeTimer = null;
+
+    const debugEl = document.getElementById('ai-debug');
 
     function speak(text) {
       const u = new SpeechSynthesisUtterance(text);
@@ -59,7 +63,7 @@
       window.speechSynthesis.speak(u);
     }
 
-    function testVoice() { speak("The Master's audio is functioning perfectly."); }
+    function testVoice() { speak("Audio verified."); }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
@@ -85,17 +89,16 @@
       curChants = 0;
       challengeActive = true;
       document.getElementById('chant-count').textContent = "";
-      
       speak(`Chant the name Shiva ${reqChants} times.`);
       document.getElementById('status').textContent = `🙏 CHANT SHIVA ${reqChants} TIMES`;
       document.getElementById('status').className = "bad";
 
       challengeTimer = setTimeout(() => {
         if (challengeActive) {
-          speak("You have failed the test. Return to mindfulness.");
+          speak("You have failed the test.");
           processSessionEnd("Kaptcha Failed");
         }
-      }, 15000); // 15 seconds to tap spacebar
+      }, 15000);
     }
 
     function registerChant() {
@@ -106,30 +109,32 @@
       if (curChants === reqChants) {
         clearTimeout(challengeTimer);
         challengeActive = false;
-        speak("Excellent. You may continue.");
+        speak("Excellent.");
         document.getElementById('status').textContent = "✅ SUCCESS";
         document.getElementById('status').className = "good";
-        
         setTimeout(() => {
           if(isRunning) {
             document.getElementById('chant-count').textContent = "";
             document.getElementById('status').textContent = "🟢 Session Active";
-            
-            // Next Kaptcha in 3 to 15 minutes
-            const delay = Math.random() * (900000 - 180000) + 180000;
-            setTimeout(triggerChallenge, delay);
+            setTimeout(triggerChallenge, (Math.random() * 900000) + 180000);
           }
         }, 3000);
       } else if (curChants > reqChants) {
           clearTimeout(challengeTimer);
-          speak("You chanted too many times.");
-          processSessionEnd("Kaptcha Failed - Incorrect Count");
+          speak("Incorrect count.");
+          processSessionEnd("Kaptcha Failed");
       }
     }
 
     async function toggleSession() {
-      document.getElementById('status').textContent = "⌛ Starting Engine...";
-      if (!camera) await initAI(); // Boots the camera
+      document.getElementById('status').textContent = "⌛ Booting AI Engine...";
+      
+      try {
+        if (!camera) await initAI();
+      } catch(e) {
+        debugEl.textContent = "FATAL CAMERA ERROR: " + e.message;
+        return;
+      }
       
       try {
         const res = await fetch(`${BACKEND_URL}/api/start-session`, {
@@ -149,8 +154,6 @@
           
           document.getElementById('status').textContent = "🟢 Session Active";
           document.getElementById('status').className = "good";
-          
-          // First check at 15 seconds
           setTimeout(triggerChallenge, 15000);
           
           tickerInterval = setInterval(() => {
@@ -165,6 +168,10 @@
 
     function onResults(results) {
       if (!isRunning) return;
+      
+      // Heartbeat pulse to prove the AI is actually looping
+      debugEl.textContent = "AI Heartbeat Active: " + new Date().toISOString().split('T')[1];
+
       const now = Date.now();
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
@@ -172,38 +179,29 @@
       if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
         const lm = results.multiFaceLandmarks[0];
         
-        // 1. EYE TRACKING (EAR Calculation)
-        // Checks distance between upper/lower eyelids vs width of the eye
         const ear = (Math.hypot(lm[159].x - lm[145].x, lm[159].y - lm[145].y) + Math.hypot(lm[158].x - lm[153].x, lm[158].y - lm[153].y)) / (2 * Math.hypot(lm[33].x - lm[133].x, lm[33].y - lm[133].y));
         
-        // Threshold: 0.18 is lenient enough for long eyelashes/deep sets
         if (ear < 0.18) closedFrameCount++; else closedFrameCount = 0;
-        const eyesClosed = closedFrameCount >= 20; // Needs to be closed for a fraction of a second to count
+        const eyesClosed = closedFrameCount >= 20; 
         
         document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
         document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
         
-        // 2. POSTURE TRACKING (FaceMesh Screen Position)
-        // If your nose (lm[1]) drops too low on the screen, you are slumping.
-        // Y goes from 0 (top) to 1 (bottom). < 0.75 means your head is mostly up.
         const postureGood = lm[1].y < 0.75; 
         
         document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
         document.getElementById('spine').className = postureGood ? "good" : "bad";
 
-        // 3. VIOLATION TIMERS
         if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
         if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
 
-        // Give 6 seconds for eyes, 10 seconds for posture before kicking
         if (eyesOpenTime > 6000 || badPostureTime > 10000) {
-          speak("You have broken the rules of the Sangha.");
+          speak("You have broken the rules.");
           processSessionEnd("Rule Violation");
         }
       } else {
-         // If no face is found at all
-         document.getElementById('eyes').textContent = "❓ Searching...";
-         document.getElementById('spine').textContent = "❓ Searching...";
+         document.getElementById('eyes').textContent = "❓ Face Lost";
+         document.getElementById('spine').textContent = "❓ Face Lost";
       }
     }
 
@@ -218,7 +216,7 @@
       v.src = "pikachu.mp4";
       v.play();
       
-      document.getElementById('status').textContent = "⌛ Syncing to Blockchain...";
+      document.getElementById('status').textContent = "⌛ Syncing...";
       document.getElementById('status').className = "";
 
       try {
@@ -229,31 +227,39 @@
           document.getElementById('status').innerHTML = `🏁 ${reason}: <span class="good">+${liveEarned.toFixed(4)}</span>`;
           fetchBalance();
       } catch(e) {
-          document.getElementById('status').textContent = "❌ Failed to save session.";
+          document.getElementById('status').textContent = "❌ Save Failed.";
       }
       
       document.getElementById('start-btn').disabled = false;
       document.getElementById('end-btn').disabled = true;
       document.getElementById('chant-count').textContent = "";
+      debugEl.textContent = "System Diagnostics: Session Ended";
     }
 
     async function initAI() {
-      // Create only FaceMesh (no Pose model needed)
-      faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
-      faceMesh.setOptions({ 
-          maxNumFaces: 1, 
-          refineLandmarks: true, 
-          minDetectionConfidence: 0.5, 
-          minTrackingConfidence: 0.5 
-      });
+      debugEl.textContent = "Initializing FaceMesh...";
+      faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}` });
+      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
       faceMesh.onResults(onResults);
       
-      const v = document.createElement('video');
-      camera = new Camera(v, { 
-          onFrame: async () => { if(isRunning) await faceMesh.send({image: v}); },
+      const webcam = document.getElementById('hidden-webcam');
+      
+      camera = new Camera(webcam, { 
+          onFrame: async () => { 
+            if(isRunning) {
+              try {
+                await faceMesh.send({image: webcam}); 
+              } catch(e) {
+                debugEl.textContent = "AI SEND ERROR: " + e.message;
+              }
+            }
+          },
           width: 640, height: 480
       });
+      
+      debugEl.textContent = "Requesting Camera Permissions...";
       await camera.start();
+      debugEl.textContent = "Camera Active. AI Ready.";
     }
   </script>
 </body>
