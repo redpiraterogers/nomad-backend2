@@ -3,21 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — The Complete Sangha</title>
+  <title>Nomad State — Force Fix</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <style>
-    body { font-family: system-ui, sans-serif; background: #0a0a1f; color: #e0d4ff; text-align: center; margin: 0; padding: 20px; overflow-x: hidden; }
-    h1 { color: #ffd700; text-shadow: 0 0 20px #ffd700; }
-    #visual-area { width: 100%; max-width: 720px; height: 480px; margin: 20px auto; border-radius: 24px; background: #000; overflow: hidden; border: 2px solid #ffd700; box-shadow: 0 0 40px rgba(255, 215, 0, 0.3); position: relative; }
-    video { width: 100%; height: 100%; object-fit: contain; position: absolute; top:0; left:0; }
+    body { font-family: system-ui, sans-serif; background: #0a0a1f; color: #e0d4ff; text-align: center; margin: 0; padding: 20px; }
+    #visual-area { width: 100%; max-width: 640px; height: 400px; margin: 20px auto; border-radius: 20px; background: #000; overflow: hidden; border: 2px solid #ffd700; position: relative; }
+    video { width: 100%; height: 100%; object-fit: contain; position: absolute; top:0; left:0; z-index: 10; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
     #status { font-size: 1.4em; margin: 15px 0; min-height: 60px; font-weight: bold; }
-    #live-counter { font-size: 3em; color: #00ff9d; font-weight: bold; text-shadow: 0 0 15px #00ff9d; }
-    #rules-display { font-size: 0.95em; color: #bfa1ff; background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 12px; margin: 10px auto; max-width: 600px; }
+    #live-counter { font-size: 3em; color: #00ff9d; font-weight: bold; }
+    #rules-display { font-size: 0.9em; color: #bfa1ff; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; margin: 10px auto; max-width: 500px; }
     .good { color: #00ff9d; }
-    .bad { color: #ff3333; }
+    .bad { color: #ff3333; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -26,24 +25,23 @@
   <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Wallet</button>
   <button id="test-audio-btn" class="btn" onclick="testVoice()" style="background:#444; color:white;">Test Master Voice</button>
 
-  <div style="font-size: 1.3em; margin: 10px;">Sangha Balance: <span id="db-balance" class="good">0.00</span> NOMAD</div>
+  <div style="font-size: 1.2em;">Sangha Balance: <span id="db-balance" class="good">0.00</span> NOMAD</div>
   <div id="live-counter">0.0000</div>
-  <div id="status">Ready to Begin</div>
+  <div id="status">Connect Wallet & Click Test Voice</div>
 
   <div id="visual-area">
-    <video id="buddha-video" loop muted playsinline></video>
-    <video id="pikachu-video" loop muted playsinline style="display:none;"></video>
+    <video id="buddha-video" loop muted playsinline preload="auto"></video>
+    <video id="pikachu-video" loop muted playsinline style="display:none;" preload="auto"></video>
   </div>
   
   <div id="rules-display">
-    <strong>Session Rules:</strong> Eyes must remain closed and head upright.<br>
-    <strong>Sustainability:</strong> You need <strong>10 NOMAD</strong> to Claim/Transfer to your wallet.
+    Rules: Eyes Closed | Head Upright | 10 NOMAD to Claim
   </div>
 
   <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
   <button id="end-btn" class="btn" onclick="processSessionEnd('Manual')" disabled>End Session</button>
 
-  <div id="metrics">
+  <div id="metrics" style="margin-top:15px;">
     Eyes: <span id="eyes">—</span> | Posture: <span id="spine">—</span>
   </div>
 
@@ -58,17 +56,17 @@
     const pikachuVideo = document.getElementById('pikachu-video');
 
     function testVoice() {
-      const utter = new SpeechSynthesisUtterance("The master is awake. Ready your mind.");
-      utter.rate = 0.8; utter.pitch = 0.7;
+      const utter = new SpeechSynthesisUtterance("The master is awake.");
+      utter.rate = 0.8; 
       window.speechSynthesis.speak(utter);
-      statusEl.textContent = "🔊 Audio Active. Master is listening.";
+      statusEl.textContent = "🔊 Audio Active. Click Start.";
     }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
       const resp = await provider.connect();
       userWallet = resp.publicKey.toString();
-      document.getElementById('wallet-btn').textContent = "Wallet: " + userWallet;
+      document.getElementById('wallet-btn').textContent = "Connected";
       document.getElementById('start-btn').disabled = false;
       fetchBalance();
     }
@@ -80,21 +78,31 @@
     }
 
     async function toggleSession() {
+      statusEl.textContent = "⌛ Syncing AI...";
+      if (!camera) await initAI(); // Force AI load on first start
+      
       const res = await fetch(`${BACKEND_URL}/api/start-session`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ walletAddress: userWallet })
       });
+
       if (res.ok) {
-        if (!camera) await initAI();
         isRunning = true;
         liveEarned = 0;
         document.getElementById('start-btn').disabled = true;
         document.getElementById('end-btn').disabled = false;
+        
         buddhaVideo.style.display = "block";
         pikachuVideo.style.display = "none";
-        buddhaVideo.play();
-        statusEl.textContent = "🟢 Session Active";
+        
+        // Force Video Play
+        const playPromise = buddhaVideo.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(error => { console.log("Video Play Blocked:", error); });
+        }
+
+        statusEl.textContent = "🟢 Mining Active";
         tickerInterval = setInterval(() => {
           liveEarned += 0.00015;
           document.getElementById('live-counter').textContent = liveEarned.toFixed(4);
@@ -108,38 +116,41 @@
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
 
-      // EYE LOGIC WITH BLINK TOLERANCE
       let eyesClosed = false;
       if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
         const lm = results.multiFaceLandmarks[0];
         const ear = (Math.hypot(lm[160].x-lm[144].x, lm[160].y-lm[144].y) + Math.hypot(lm[158].x-lm[153].x, lm[158].y-lm[153].y)) / (2 * Math.hypot(lm[33].x-lm[133].x, lm[33].y-lm[133].y));
         if (ear < 0.22) closedFrameCount++; else closedFrameCount = 0;
-        eyesClosed = (closedFrameCount >= 30); // Must be closed for ~30 frames to count
+        eyesClosed = (closedFrameCount >= 25); 
         document.getElementById('eyes').textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
         document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
       }
 
-      // POSTURE
       let postureGood = false;
       if (results.poseLandmarks) {
         const nose = results.poseLandmarks[0];
         postureGood = nose.y < (results.poseLandmarks[11].y + results.poseLandmarks[12].y) / 2;
-        document.getElementById('spine').textContent = postureGood ? "✅ Good" : "⚠️ Slumping";
+        document.getElementById('spine').textContent = postureGood ? "✅ Upright" : "⚠️ Slumping";
+        document.getElementById('spine').className = postureGood ? "good" : "bad";
       }
 
       if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
       if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
 
-      if (eyesOpenTime > 4000 || badPostureTime > 4000) processSessionEnd("Rules Broken");
+      if (eyesOpenTime > 4000 || badPostureTime > 4000) {
+          processSessionEnd("Rules Broken");
+      }
     }
 
     async function processSessionEnd(reason) {
       if (!isRunning) return;
       isRunning = false;
       clearInterval(tickerInterval);
+      buddhaVideo.pause();
       buddhaVideo.style.display = "none";
       pikachuVideo.style.display = "block";
       pikachuVideo.play();
+
       const res = await fetch(`${BACKEND_URL}/api/end-session`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -155,13 +166,25 @@
     async function initAI() {
       poseDetector = new Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
       faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+      poseDetector.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
+      faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.5 });
       poseDetector.onResults(onResults);
       faceMesh.onResults(onResults);
+      
       const v = document.createElement('video');
-      camera = new Camera(v, { onFrame: async () => { if(isRunning) { await poseDetector.send({image: v}); await faceMesh.send({image: v}); } } });
-      await camera.start();
+      camera = new Camera(v, { onFrame: async () => { 
+        if(isRunning) { await poseDetector.send({image: v}); await faceMesh.send({image: v}); } 
+      }, width: 640, height: 480 });
+      
+      await camera.start().catch(e => {
+          alert("Camera Error: Please allow camera access in your browser settings.");
+      });
     }
-    window.onload = () => { buddhaVideo.src = "buddha.mp4"; pikachuVideo.src = "pikachu.mp4"; };
+
+    window.onload = () => { 
+        buddhaVideo.src = "buddha.mp4"; 
+        pikachuVideo.src = "pikachu.mp4"; 
+    };
   </script>
 </body>
 </html>
