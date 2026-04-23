@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Responsive Zen</title>
+  <title>Nomad State — The Master's Voice</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -46,7 +46,7 @@
     const BACKEND_URL = "https://nomad-backend-u20g.onrender.com";
     let isRunning = false, userWallet = null, liveEarned = 0, tickerInterval = null;
     let eyesOpenTime = 0, badPostureTime = 0, lastFrameTime = 0, closedFrameCount = 0;
-    let poseDetector, faceMesh, camera, activeChallenge = null;
+    let poseDetector, faceMesh, camera, activeChallenge = null, challengeTimer = null;
 
     const videoEl = document.getElementById('active-video');
     const statusEl = document.getElementById('status');
@@ -83,9 +83,12 @@
       speak("Please " + activeChallenge);
       statusEl.textContent = "⚡ " + activeChallenge.toUpperCase();
 
-      setTimeout(() => {
-        if (activeChallenge) processSessionEnd("Kaptcha Failed");
-      }, 12000);
+      challengeTimer = setTimeout(() => {
+        if (activeChallenge) {
+            speak("You have failed the test. Return to mindfulness.");
+            processSessionEnd("Kaptcha Failed");
+        }
+      }, 15000);
     }
 
     async function toggleSession() {
@@ -118,7 +121,6 @@
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
 
-      // 1. EYES (Indicator Refresh)
       let eyesClosed = false;
       if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
         const lm = results.multiFaceLandmarks[0];
@@ -131,7 +133,6 @@
         eyesEl.textContent = "❓ Searching...";
       }
 
-      // 2. POSTURE (Indicator Refresh)
       let postureGood = false;
       let currentPose = "center";
       if (results.poseLandmarks) {
@@ -143,19 +144,19 @@
         spineEl.textContent = postureGood ? "✅ Head Up" : "⚠️ Slumped";
         spineEl.className = postureGood ? "good" : "bad";
 
-        // Kaptcha Sensitivity (0.02)
-        if (nose.x < ls.x - 0.02) currentPose = "tilt your head to the left";
-        else if (nose.x > rs.x + 0.02) currentPose = "tilt your head to the right";
-        else if (nose.y > (ls.y + rs.y) / 2 + 0.02) currentPose = "bow your head forward";
+        if (nose.x < ls.x - 0.01) currentPose = "tilt your head to the left";
+        else if (nose.x > rs.x + 0.01) currentPose = "tilt your head to the right";
+        else if (nose.y > (ls.y + rs.y) / 2 + 0.01) currentPose = "bow your head forward";
 
         if (activeChallenge && currentPose === activeChallenge) {
+          clearTimeout(challengeTimer); // Stop the "Fail" timer
           activeChallenge = null;
           speak("Excellent. Return to center.");
           statusEl.textContent = "✅ SUCCESS";
           setTimeout(() => { 
             if(isRunning) {
                 statusEl.textContent = "🟢 Session Active";
-                const delay = Math.random() * (900000 - 180000) + 180000;
+                const delay = Math.random() * (1020000 - 180000) + 180000;
                 setTimeout(triggerChallenge, delay);
             }
           }, 3000);
@@ -167,7 +168,8 @@
       if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
       if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
 
-      if (eyesOpenTime > 6000 || badPostureTime > 10000) {
+      if (eyesOpenTime > 7000 || badPostureTime > 12000) {
+          speak("You have failed the test. Return to mindfulness.");
           processSessionEnd("Rule Violation");
       }
     }
@@ -176,6 +178,7 @@
       if (!isRunning) return;
       isRunning = false;
       clearInterval(tickerInterval);
+      clearTimeout(challengeTimer);
       videoEl.src = "pikachu.mp4";
       videoEl.play();
       statusEl.textContent = "⌛ Syncing...";
@@ -195,8 +198,8 @@
     async function initAI() {
       poseDetector = new Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
       faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
-      poseDetector.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.4 });
-      faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.4 });
+      poseDetector.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.3 });
+      faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.3 });
       poseDetector.onResults(onResults);
       faceMesh.onResults(onResults);
       const v = document.createElement('video');
