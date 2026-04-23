@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nomad State — Relaxed Posture Mode</title>
+  <title>Nomad State — Responsive Zen</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -14,8 +14,9 @@
     #status { font-size: 1.4em; margin: 15px 0; min-height: 40px; font-weight: bold; color: #ffd700; }
     #live-counter { font-size: 3.5em; color: #00ff9d; font-weight: bold; margin: 10px 0; }
     .btn { background: #ffd700; color: #1a0033; border: none; padding: 14px 28px; font-size: 1.1em; margin: 8px; border-radius: 50px; cursor: pointer; font-weight: bold; }
-    .good { color: #00ff9d; }
+    .good { color: #00ff9d; font-weight: bold; }
     .bad { color: #ff3333; font-weight: bold; }
+    #metrics { margin-top: 10px; font-size: 1.2em; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; display: inline-block; }
   </style>
 </head>
 <body>
@@ -25,7 +26,7 @@
   <button id="wallet-btn" class="btn" onclick="connectWallet()" style="background:#9945FF; color:white;">Connect Wallet</button>
   <button id="test-btn" class="btn" onclick="testVoice()">Test Voice</button>
 
-  <div style="font-size: 1.1em; margin: 10px;">Total: <span id="db-balance">0.00</span> NOMAD</div>
+  <div style="font-size: 1.1em; margin: 10px;">Total Balance: <span id="db-balance">0.00</span> NOMAD</div>
   <div id="live-counter">0.0000</div>
   <div id="status">Ready</div>
 
@@ -36,8 +37,9 @@
   <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
   <button id="end-btn" class="btn" onclick="processSessionEnd('Manual')" disabled>End Session</button>
 
-  <div id="metrics" style="margin-top:10px; font-size: 1.1em;">
-    Eyes: <span id="eyes">—</span> | Posture: <span id="spine">—</span>
+  <br>
+  <div id="metrics">
+    Eyes: <span id="eyes" class="bad">—</span> | Posture: <span id="spine" class="bad">—</span>
   </div>
 
   <script>
@@ -48,14 +50,16 @@
 
     const videoEl = document.getElementById('active-video');
     const statusEl = document.getElementById('status');
+    const eyesEl = document.getElementById('eyes');
+    const spineEl = document.getElementById('spine');
 
     function speak(text) {
       const u = new SpeechSynthesisUtterance(text);
-      u.rate = 0.8; u.pitch = 0.7;
+      u.rate = 0.85; u.pitch = 0.7;
       window.speechSynthesis.speak(u);
     }
 
-    function testVoice() { speak("The Zen Master is listening."); }
+    function testVoice() { speak("The Master is present. Audio levels confirmed."); }
 
     async function connectWallet() {
       const provider = window?.phantom?.solana || window?.solana;
@@ -81,7 +85,7 @@
 
       setTimeout(() => {
         if (activeChallenge) processSessionEnd("Kaptcha Failed");
-      }, 12000); // Increased to 12s for comfort
+      }, 12000);
     }
 
     async function toggleSession() {
@@ -114,18 +118,20 @@
       const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
       lastFrameTime = now;
 
-      // 1. EYES (Lenient)
+      // 1. EYES (Indicator Refresh)
       let eyesClosed = false;
       if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
         const lm = results.multiFaceLandmarks[0];
         const ear = (Math.hypot(lm[160].y-lm[144].y) + Math.hypot(lm[158].y-lm[153].y)) / (2 * Math.hypot(lm[33].x-lm[133].x));
         if (ear < 0.17) closedFrameCount++; else closedFrameCount = 0;
         eyesClosed = (closedFrameCount >= 35); 
-        document.getElementById('eyes').textContent = eyesClosed ? "✅" : "⚠️ OPEN";
-        document.getElementById('eyes').className = eyesClosed ? "good" : "bad";
+        eyesEl.textContent = eyesClosed ? "✅ Closed" : "⚠️ OPEN";
+        eyesEl.className = eyesClosed ? "good" : "bad";
+      } else {
+        eyesEl.textContent = "❓ Searching...";
       }
 
-      // 2. LOOSE POSTURE & SENSITIVE KAPTCHA
+      // 2. POSTURE (Indicator Refresh)
       let postureGood = false;
       let currentPose = "center";
       if (results.poseLandmarks) {
@@ -133,33 +139,35 @@
         const ls = results.poseLandmarks[11];
         const rs = results.poseLandmarks[12];
         
-        // POSTURE REQUIREMENT: Nose must be higher than the average shoulder height
         postureGood = nose.y < ((ls.y + rs.y) / 2);
-        document.getElementById('spine').textContent = postureGood ? "✅ Head Up" : "⚠️ Slumped";
-        document.getElementById('spine').className = postureGood ? "good" : "bad";
+        spineEl.textContent = postureGood ? "✅ Head Up" : "⚠️ Slumped";
+        spineEl.className = postureGood ? "good" : "bad";
 
-        // KAPTCHA SENSITIVITY (0.02)
+        // Kaptcha Sensitivity (0.02)
         if (nose.x < ls.x - 0.02) currentPose = "tilt your head to the left";
         else if (nose.x > rs.x + 0.02) currentPose = "tilt your head to the right";
         else if (nose.y > (ls.y + rs.y) / 2 + 0.02) currentPose = "bow your head forward";
 
         if (activeChallenge && currentPose === activeChallenge) {
           activeChallenge = null;
-          statusEl.textContent = "✅ Accepted. Return to center.";
+          speak("Excellent. Return to center.");
+          statusEl.textContent = "✅ SUCCESS";
           setTimeout(() => { 
             if(isRunning) {
                 statusEl.textContent = "🟢 Session Active";
-                const delay = Math.random() * (900000 - 180000) + 180000; // 3 to 15 min loop
+                const delay = Math.random() * (900000 - 180000) + 180000;
                 setTimeout(triggerChallenge, delay);
             }
           }, 3000);
         }
+      } else {
+        spineEl.textContent = "❓ Searching...";
       }
 
       if (!eyesClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
       if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
 
-      if (eyesOpenTime > 6000 || badPostureTime > 10000) { // 10s grace for posture
+      if (eyesOpenTime > 6000 || badPostureTime > 10000) {
           processSessionEnd("Rule Violation");
       }
     }
@@ -170,7 +178,7 @@
       clearInterval(tickerInterval);
       videoEl.src = "pikachu.mp4";
       videoEl.play();
-      statusEl.textContent = "⌛ Saving...";
+      statusEl.textContent = "⌛ Syncing...";
 
       await fetch(`${BACKEND_URL}/api/end-session`, {
         method: 'POST',
@@ -187,8 +195,8 @@
     async function initAI() {
       poseDetector = new Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
       faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
-      poseDetector.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
-      faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.5 });
+      poseDetector.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.4 });
+      faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.4 });
       poseDetector.onResults(onResults);
       faceMesh.onResults(onResults);
       const v = document.createElement('video');
