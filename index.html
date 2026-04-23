@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nomad State — Mine NOMAD Through Presence</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: linear-gradient(135deg, #0a0a1f, #1a0033);
+      color: #e0d4ff;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      overflow: hidden;
+    }
+    h1 { color: #ffd700; text-shadow: 0 0 20px #ffd700; }
+    #container { max-width: 920px; margin: auto; }
+
+    #visual-area {
+      position: relative;
+      width: 100%;
+      max-width: 720px;
+      height: 520px;
+      margin: 25px auto 10px auto;
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 0 60px rgba(255, 215, 0, 0.6);
+      background: #000;
+    }
+    
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      transition: opacity 1.2s ease;
+    }
+
+    .glowing {
+      animation: pulse-glow 2.5s infinite alternate ease-in-out;
+    }
+    
+    @keyframes pulse-glow {
+      from { filter: drop-shadow(0 0 30px #ffd700) brightness(1); }
+      to { filter: drop-shadow(0 0 90px #ffaa00) brightness(1.45); }
+    }
+
+    #rules-display {
+      font-size: 1.1em;
+      color: #bfa1ff;
+      margin-bottom: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 10px;
+      border-radius: 12px;
+      display: inline-block;
+    }
+
+    #status {
+      font-size: 1.55em;
+      margin: 10px 0 20px 0;
+      min-height: 80px;
+      font-weight: 600;
+      transition: all 0.4s;
+    }
+    .warning { color: #ffcc00 !important; }
+    .violation { color: #ff3333 !important; animation: buzz 0.4s 4; }
+
+    @keyframes buzz {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-8px); }
+      75% { transform: translateX(8px); }
+    }
+
+    .btn {
+      background: #ffd700;
+      color: #1a0033;
+      border: none;
+      padding: 16px 40px;
+      font-size: 1.3em;
+      margin: 12px;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 0 30px #ffd700;
+      font-weight: bold;
+    }
+    .btn:hover { transform: scale(1.08); }
+    .btn:disabled { background: #555; box-shadow: none; cursor: not-allowed; transform: none; }
+
+    #wallet-btn { background: #9945FF; color: white; box-shadow: 0 0 20px #9945FF; }
+
+    #metrics { margin-top: 30px; font-size: 1.2em; line-height: 1.7; }
+    .good { color: #00ff9d; font-weight: bold; }
+    .warning-text { color: #ffcc00; }
+    
+    #pool-balance {
+      font-size: 1.5em;
+      color: #00ff9d;
+      margin-top: 15px;
+      font-weight: bold;
+      text-shadow: 0 0 10px #00ff9d;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h1>🪷 Nomad State</h1>
+    
+    <button id="wallet-btn" class="btn" onclick="connectWallet()">Connect Phantom Wallet</button>
+    <div id="pool-balance" style="display:none;">Sangha Pool Balance: <span id="db-balance">0.00</span> NOMAD</div>
+
+    <div id="visual-area">
+      <video id="buddha-video" loop muted playsinline></video>
+      <video id="pikachu-video" loop muted playsinline style="display:none;"></video>
+    </div>
+    
+    <div id="rules-display">
+      <strong>Session Rules:</strong> Eyes must remain closed and head upright. <br>
+      <em>A 4-second violation of either rule will end the session.</em>
+    </div>
+
+    <div id="status">Connect wallet to begin.</div>
+    
+    <button id="start-btn" class="btn" onclick="toggleSession()" disabled>Start Session</button>
+    <button id="end-btn" class="btn" onclick="endSessionManually()" disabled>End Session</button>
+
+    <div id="metrics">
+      Stillness: <span id="stillness">0</span>% &nbsp;|&nbsp;
+      Posture: <span id="spine">—</span> &nbsp;|&nbsp;
+      Eyes: <span id="eyes">—</span><br>
+      Chakra Intensity: <span id="chakra">0.0</span>
+    </div>
+  </div>
+
+  <script>
+    // === RENDER URL APPLIED ===
+    const BACKEND_URL = "https://nomad-backend-u20g.onrender.com"; 
+
+    const BUDDHA_MP4 = "buddha.mp4";
+    const PIKACHU_MP4 = "pikachu.mp4";
+
+    let poseDetector, faceMesh, camera;
+    let isRunning = false;
+    let userWallet = null;
+    let currentIntensity = 0;
+
+    let closedFrameCount = 0;
+    const EAR_THRESHOLD = 0.22;
+    const REQUIRED_CONSECUTIVE_FRAMES = 45;
+
+    let eyesOpenTime = 0;
+    let badPostureTime = 0;
+    const VIOLATION_LIMIT = 4000; 
+    const WARNING_LIMIT = 2000;   
+
+    let lastFrameTime = 0;
+    let warningActive = false;
+    let lastLandmarks = null;
+
+    const buddhaVideo = document.getElementById('buddha-video');
+    const pikachuVideo = document.getElementById('pikachu-video');
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('start-btn');
+    const endBtn = document.getElementById('end-btn');
+    const walletBtn = document.getElementById('wallet-btn');
+
+    // === RE-FIXED WALLET CONNECTION ===
+    async function connectWallet() {
+      console.log("Button clicked. Detecting provider...");
+
+      // 1. Direct check for Phantom
+      const provider = window?.phantom?.solana || window?.solana;
+
+      if (!provider || !provider.isPhantom) {
+        console.error("Phantom not found in window object.");
+        alert("Phantom Wallet extension not detected. Make sure it's installed and enabled in your browser extensions!");
+        window.open("https://phantom.app/", "_blank");
+        return;
+      }
+
+      try {
+        statusEl.textContent = "⏳ Waiting for Phantom approval...";
+        console.log("Calling provider.connect()...");
+        
+        const resp = await provider.connect();
+        userWallet = resp.publicKey.toString();
+        
+        console.log("Success! Wallet:", userWallet);
+        
+        walletBtn.textContent = "Wallet Connected: " + userWallet.slice(0, 4) + "..." + userWallet.slice(-4);
+        walletBtn.style.backgroundColor = "#00ff9d";
+        walletBtn.disabled = true;
+        startBtn.disabled = false;
+        
+        statusEl.textContent = "🟢 Wallet Connected. Ready to start.";
+        fetchBalance();
+      } catch (err) {
+        console.error("Connection error:", err);
+        statusEl.textContent = "❌ Connection Denied. Unlock Phantom and try again.";
+      }
+    }
+
+    async function fetchBalance() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/balance/${userWallet}`);
+        const data = await res.json();
+        document.getElementById('pool-balance').style.display = 'block';
+        document.getElementById('db-balance').textContent = (data.balance || 0).toFixed(2);
+      } catch (e) {
+        console.error("Balance fetch error:", e);
+      }
+    }
+
+    async function toggleSession() {
+      if (!userWallet) return alert("Connect wallet first!");
+      try {
+        statusEl.textContent = "⏳ Syncing with Sangha backend...";
+        const res = await fetch(`${BACKEND_URL}/api/start-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress: userWallet })
+        });
+        if (res.ok) {
+          if (!camera) startCamera();
+          isRunning = true;
+          startBtn.disabled = true;
+          endBtn.disabled = false;
+          resetSessionState();
+        } else {
+          statusEl.textContent = "❌ Backend refused session. Try refreshing.";
+        }
+      } catch (err) {
+        statusEl.textContent = "❌ Could not reach Render server. Check your backend status.";
+      }
+    }
+
+    async function processSessionEnd(reason) {
+      if (!isRunning) return;
+      isRunning = false;
+      startBtn.disabled = false;
+      endBtn.disabled = true;
+      
+      buddhaVideo.pause();
+      buddhaVideo.classList.remove('glowing');
+      buddhaVideo.style.opacity = '0.3';
+      statusEl.textContent = "⏳ Verifying session with database...";
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/end-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress: userWallet, userIntensity: currentIntensity })
+        });
+        const data = await res.json();
+        setTimeout(() => {
+          buddhaVideo.style.display = 'none';
+          pikachuVideo.style.display = 'block';
+          pikachuVideo.play().catch(() => {});
+          if (data.success) {
+            statusEl.innerHTML = `🌟 Session Complete!<br>Earned: <span style="color:#00ff9d">+${(data.earned || 0).toFixed(2)} NOMAD</span>`;
+            document.getElementById('db-balance').textContent = (data.newBalance || 0).toFixed(2);
+          } else {
+            statusEl.textContent = `⛔ Session Ended — ${reason || data.error}`;
+            statusEl.classList.add('violation');
+          }
+        }, 800);
+      } catch (err) {
+        statusEl.textContent = "❌ Error saving session to database.";
+      }
+    }
+
+    function endSessionManually() { processSessionEnd("Manually Ended"); }
+    function triggerViolation() { processSessionEnd("4 Second Rule Violation"); }
+
+    function setupVideos() {
+      buddhaVideo.src = BUDDHA_MP4;
+      pikachuVideo.src = PIKACHU_MP4;
+      buddhaVideo.load();
+      pikachuVideo.load();
+    }
+
+    async function initDetectors() {
+      poseDetector = new Pose({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+      poseDetector.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5 });
+      faceMesh = new FaceMesh({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+      faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
+      poseDetector.onResults(onResults);
+      faceMesh.onResults(onResults);
+    }
+
+    function onResults(results) {
+      if (!isRunning) return;
+      const now = Date.now();
+      const delta = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.1;
+      lastFrameTime = now;
+      let postureGood = false;
+      let sustainedClosed = false;
+      let movement = 0;
+      if (results.poseLandmarks) {
+        const nose = results.poseLandmarks[0];
+        const ls = results.poseLandmarks[11];
+        const rs = results.poseLandmarks[12];
+        if (nose && ls && rs) postureGood = nose.y < (ls.y + rs.y) / 2;
+        document.getElementById('spine').textContent = postureGood ? '✅ Good' : '⚠️ Head above shoulders';
+        document.getElementById('spine').className = postureGood ? 'good' : 'warning-text';
+        if (lastLandmarks) {
+          for (let i = 0; i < results.poseLandmarks.length; i++) {
+            if (lastLandmarks[i]) movement += Math.hypot(results.poseLandmarks[i].x - lastLandmarks[i].x, results.poseLandmarks[i].y - lastLandmarks[i].y);
+          }
+        }
+        lastLandmarks = [...results.poseLandmarks];
+      }
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks[0]) {
+        const lm = results.multiFaceLandmarks[0];
+        const leftEAR = calculateEAR(lm, [33,160,158,133,153,144]);
+        const rightEAR = calculateEAR(lm, [362,385,387,263,373,380]);
+        const avgEAR = (leftEAR + rightEAR) / 2;
+        if (avgEAR < EAR_THRESHOLD) closedFrameCount++; else closedFrameCount = 0;
+        sustainedClosed = closedFrameCount >= REQUIRED_CONSECUTIVE_FRAMES;
+        document.getElementById('eyes').textContent = sustainedClosed ? '✅ Eyes Closed' : '⚠️ Eyes Open / Blinking';
+        document.getElementById('eyes').className = sustainedClosed ? 'good' : 'warning-text';
+      }
+      if (!sustainedClosed) eyesOpenTime += delta * 1000; else eyesOpenTime = 0;
+      if (!postureGood) badPostureTime += delta * 1000; else badPostureTime = 0;
+      handleWarningsAndViolations();
+      if (isRunning) {
+        let stillnessScore = Math.max(0, 100 - (movement * 700));
+        document.getElementById('stillness').textContent = stillnessScore.toFixed(0);
+        currentIntensity = (stillnessScore / 100) * (postureGood && sustainedClosed ? 1.6 : 0.7);
+        document.getElementById('chakra').textContent = currentIntensity.toFixed(1);
+      }
+    }
+
+    function calculateEAR(landmarks, points) {
+      const p1 = landmarks[points[0]], p2 = landmarks[points[1]], p3 = landmarks[points[2]], p4 = landmarks[points[3]], p5 = landmarks[points[4]], p6 = landmarks[points[5]];
+      return (Math.hypot(p2.x-p6.x, p2.y-p6.y) + Math.hypot(p3.x-p5.x, p3.y-p5.y)) / (2 * Math.hypot(p1.x-p4.x, p1.y-p4.y));
+    }
+
+    function handleWarningsAndViolations() {
+      if (eyesOpenTime > VIOLATION_LIMIT || badPostureTime > VIOLATION_LIMIT) { triggerViolation(); return; }
+      const isWarning = (eyesOpenTime > WARNING_LIMIT || badPostureTime > WARNING_LIMIT);
+      if (isWarning && !warningActive) { statusEl.classList.add('warning'); statusEl.textContent = "⚠️ Warning — Return to posture and close eyes"; warningActive = true; }
+      else if (!isWarning && warningActive) { statusEl.classList.remove('warning'); statusEl.textContent = "🟢 Mining Active — Buddha is minting NOMAD"; warningActive = false; }
+    }
+
+    async function startCamera() {
+      await initDetectors();
+      const video = document.createElement('video');
+      video.style.display = 'none';
+      document.body.appendChild(video);
+      camera = new Camera(video, { onFrame: async () => { if (poseDetector) await poseDetector.send({image: video}); if (faceMesh) await faceMesh.send({image: video}); }, width: 640, height: 480 });
+      try { await camera.start(); } catch (e) { statusEl.textContent = "❌ Camera access denied"; }
+    }
+
+    function resetSessionState() {
+      closedFrameCount = 0; eyesOpenTime = 0; badPostureTime = 0; lastFrameTime = Date.now(); warningActive = false; lastLandmarks = null;
+      statusEl.textContent = "🟢 Mining Active — Buddha is minting NOMAD";
+      statusEl.classList.remove('warning', 'violation');
+      buddhaVideo.style.display = 'block'; buddhaVideo.style.opacity = '1'; buddhaVideo.classList.add('glowing');
+      buddhaVideo.play().catch(e => console.log("Buddha video failed:", e));
+      pikachuVideo.style.display = 'none'; pikachuVideo.pause();
+    }
+
+    window.onload = () => { setupVideos(); };
+  </script>
+</body>
+</html>
