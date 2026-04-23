@@ -5,110 +5,156 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Stillness Protocol | $STILL</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/facemesh"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@300;900&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; background: #050505; color: #e0e0e0; font-family: 'Inter', sans-serif; overflow: hidden; }
-        
-        /* Vesting Countdown Banner */
-        .banner { background: #ffd700; color: #000; padding: 12px; text-align: center; font-weight: 800; position: fixed; top: 0; width: 100%; z-index: 1000; text-transform: uppercase; letter-spacing: 1px; }
-        
-        .main-ui { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 20px; }
-        
-        /* Logo from local directory */
-        .logo { width: 100px; height: 100px; object-fit: contain; filter: drop-shadow(0 0 10px #ffd700); }
+        :root { --gold: #ffd700; --bg: #050505; --gray: #1a1a1a; }
+        body { margin: 0; background: var(--bg); color: #e0e0e0; font-family: 'Inter', sans-serif; overflow-x: hidden; }
+        .view { display: none; min-height: 100vh; width: 100%; flex-direction: column; align-items: center; justify-content: center; padding: 40px; box-sizing: border-box; }
+        .active { display: flex; }
 
-        /* Video System */
-        #display-stack { position: relative; width: 640px; height: 480px; border-radius: 20px; border: 4px solid #1a1a1a; overflow: hidden; background: #000; box-shadow: 0 0 40px rgba(0,0,0,0.8); }
-        video, canvas { position: absolute; top: 0; left: 0; width: 640px; height: 480px; border-radius: 16px; }
+        /* Typography */
+        h1, h2 { font-family: 'Cinzel', serif; letter-spacing: 4px; color: var(--gold); text-align: center; }
+        .gold-text { color: var(--gold); font-weight: 900; }
+
+        /* Landing Page */
+        #landing { background: radial-gradient(circle at center, #111 0%, #050505 100%); }
+        .hero-desc { max-width: 600px; text-align: center; line-height: 1.6; color: #888; margin-bottom: 40px; }
+        .btn-group { display: flex; gap: 20px; }
+        .btn { padding: 18px 40px; border-radius: 50px; font-weight: 900; cursor: pointer; text-transform: uppercase; letter-spacing: 2px; transition: 0.3s; border: none; text-decoration: none; display: inline-block; }
+        .btn-gold { background: var(--gold); color: #000; }
+        .btn-outline { background: transparent; border: 1px solid #444; color: #fff; }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(255,215,0,0.2); }
+
+        /* Sutra (Whitepaper) */
+        #sutra { max-width: 800px; margin: 0 auto; text-align: left; display: none; padding: 100px 20px; }
+        .sutra-verse { margin-bottom: 40px; border-left: 1px solid var(--gold); padding-left: 20px; font-style: italic; color: #bbb; }
+
+        /* Active Session UI */
+        #session { padding-top: 80px; }
+        #display-stack { position: relative; width: 640px; height: 480px; border-radius: 20px; border: 4px solid var(--gray); overflow: hidden; background: #000; }
+        video { position: absolute; width: 100%; height: 100%; transform: scaleX(-1); opacity: 0.4; filter: grayscale(1); }
+        .dashboard { background: #0a0a0a; padding: 30px; border-radius: 24px; border: 1px solid #222; text-align: center; min-width: 420px; margin-top: 20px; }
+        .stat-value { font-family: 'Cinzel', serif; font-size: 3rem; color: var(--gold); }
+        .meter-bg { width: 100%; background: var(--gray); height: 8px; border-radius: 10px; margin: 20px 0; overflow: hidden; }
+        #silence-meter { width: 0%; height: 100%; background: var(--gold); transition: width 0.5s; }
         
-        /* Layering: Camera (Bottom) -> Feedback Video (Middle) -> UI (Top) */
-        #webcam { transform: scaleX(-1); opacity: 0.3; } /* Camera is dimmed to show feedback video better */
-        #feedback-video { z-index: 5; object-fit: cover; transition: opacity 0.5s; }
-        
-        .dashboard { background: #111; padding: 25px; border-radius: 20px; border: 1px solid #222; text-align: center; min-width: 400px; z-index: 10; }
-        .stat-label { font-size: 0.8rem; color: #888; text-transform: uppercase; margin-bottom: 5px; }
-        .stat-value { font-size: 2rem; font-weight: 800; color: #ffd700; margin-bottom: 15px; }
-        
-        .btn-start { background: #ffd700; color: #000; border: none; padding: 18px 45px; border-radius: 50px; font-weight: 900; cursor: pointer; transition: 0.3s; text-transform: uppercase; box-shadow: 0 5px 15px rgba(255,215,0,0.2); }
-        .btn-start:hover { transform: scale(1.05); background: #fff; }
-        
-        #overlay-status { position: absolute; bottom: 20px; width: 100%; text-align: center; z-index: 100; font-weight: 900; font-size: 1.5rem; text-shadow: 2px 2px 4px #000; }
+        .banner { background: var(--gold); color: #000; padding: 12px; text-align: center; font-weight: 900; position: fixed; top: 0; width: 100%; z-index: 1000; text-transform: uppercase; }
     </style>
 </head>
 <body>
 
-<div class="banner">
-    ⚠️ Payouts Locked. Accumulate Presence Points. Unlocking in: <span id="timer">--:--:--</span>
-</div>
+<section id="landing" class="view active">
+    <h1>THE STILLNESS PROTOCOL</h1>
+    <p class="hero-desc">
+        $STILL is backed by the scarcest resource on earth: <span class="gold-text">Human Attention</span>. 
+        Choosing stillness over reactive noise. Presence over distraction. 
+        The ledger is public. The proof is mathematical.
+    </p>
+    <div class="btn-group">
+        <button class="btn btn-gold" onclick="switchView('session'); initProtocol();">Start Holding Still</button>
+        <button class="btn btn-outline" onclick="switchView('sutra')">Read The Sutra</button>
+    </div>
+</section>
 
-<div class="main-ui">
-    <img src="logo.png" alt="Stillness Protocol" class="logo">
-    
+<section id="sutra" class="view">
+    <h2>THE SUTRA OF STILLNESS</h2>
+    <div class="sutra-verse">
+        01. The coin that can be minted by machines is not the eternal coin.<br>
+        The proof that requires no life is not the living proof.<br>
+        Presence is the beginning of all value.
+    </div>
+    <div class="sutra-verse">
+        02. Bitcoin is backed by the energy of machines[cite: 110].<br>
+        $STILL is backed by the attention of humans[cite: 110].<br>
+        One becomes cheaper every year; the other remains the only truth.
+    </div>
+    <div class="sutra-verse">
+        03. Seven hours is the Sacrament[cite: 41].<br>
+        Not because the number is magic, but because the silence is long.<br>
+        In the long silence, the nervous system shifts its octave[cite: 48].
+    </div>
+    <button class="btn btn-outline" onclick="switchView('landing')">Return to Gateway</button>
+</section>
+
+<section id="session" class="view">
+    <div class="banner">⚠️ Session Active: <span id="timer">24:00:00</span></div>
     <div id="display-stack">
         <video id="webcam" autoplay playsinline></video>
-        <video id="feedback-video" autoplay loop muted></video>
-        <div id="overlay-status">INITIALIZING AI...</div>
+        <div id="overlay-status" style="position:absolute; width:100%; top:50%; text-align:center; font-family:'Cinzel'; font-size:2rem; font-weight:900;">AWAITING PRESENCE</div>
     </div>
-
     <div class="dashboard">
-        <div class="stat-label">Total Presence Accumulation</div>
-        <div id="points" class="stat-value">0.00 $STILL</div>
-        <button class="btn-start" onclick="initProtocol()">Begin Stillness</button>
+        <div class="stat-value" id="points">0.00 $STILL</div>
+        <div class="meter-bg"><div id="silence-meter"></div></div>
+        <p id="sub-status" style="color:#666; font-size:0.8rem; letter-spacing:2px;">SILENCE METER</p>
     </div>
-</div>
+</section>
 
 <script>
-    // 1. DYNAMIC VESTING COUNTDOWN
-    const target = new Date("2026-01-10T21:00:00").getTime();
+    function switchView(id) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    // 24-HOUR COUNTDOWN
+    let secondsLeft = 24 * 60 * 60;
     setInterval(() => {
-        const diff = target - new Date().getTime();
-        const h = Math.floor(diff / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        document.getElementById('timer').innerHTML = `${h}h ${m}m ${s}s`;
+        const h = Math.floor(secondsLeft / 3600);
+        const m = Math.floor((secondsLeft % 3600) / 60);
+        const s = secondsLeft % 60;
+        document.getElementById('timer').innerText = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        if (secondsLeft > 0) secondsLeft--;
     }, 1000);
 
-    // 2. AI & VIDEO FEEDBACK LOGIC
-    let points = 0;
-    const webcam = document.getElementById('webcam');
-    const feedback = document.getElementById('feedback-video');
-    const status = document.getElementById('overlay-status');
-    const pointsDisplay = document.getElementById('points');
+    // AI & PROTOCOL LOGIC
+    let detector, webcam, accumulatedPoints = 0, violationSeconds = 0;
+    const synth = window.speechSynthesis;
 
     async function initProtocol() {
-        status.innerHTML = "LOADING BIOMETRICS...";
+        webcam = document.getElementById('webcam');
+        const status = document.getElementById('overlay-status');
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         webcam.srcObject = stream;
-        
-        const model = await facemesh.load();
-        status.innerHTML = "SCANNING...";
-        runDetection(model);
-    }
 
-    async function runDetection(model) {
-        const predictions = await model.estimateFaces(webcam);
-        
-        if (predictions.length > 0) {
-            // SUCCESS: Play Blue.mp4
-            if (feedback.src.indexOf('blue.mp4') === -1) {
-                feedback.src = 'blue.mp4';
-                status.style.color = "#ffd700";
-                status.innerHTML = "STILLNESS ACTIVE";
+        detector = await faceLandmarksDetection.createDetector(
+            faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+            { runtime: 'tfjs', refineLandmarks: true }
+        );
+
+        setInterval(async () => {
+            const faces = await detector.estimateFaces(webcam);
+            const meter = document.getElementById('silence-meter');
+            const pointsDisplay = document.getElementById('points');
+            
+            if (faces.length > 0) {
+                const keypoints = faces[0].keypoints;
+                const eyeGap = Math.abs(keypoints[159].y - keypoints[145].y);
+                const nose = keypoints[1];
+                const isCentered = nose.x > 220 && nose.x < 420;
+
+                if (eyeGap < 3.5 && isCentered) {
+                    violationSeconds = 0;
+                    accumulatedPoints += 0.05;
+                    meter.style.width = "100%";
+                    status.innerText = "STILLNESS ACTIVE";
+                    status.style.color = "#ffd700";
+                } else {
+                    violationSeconds += 0.2;
+                    meter.style.width = "20%";
+                    status.style.color = "#ff4444";
+                    status.innerText = `VIOLATION: ${Math.round(50 - violationSeconds)}s`;
+                    if (violationSeconds >= 50) location.reload();
+                }
+                pointsDisplay.innerText = accumulatedPoints.toFixed(2) + " $STILL";
             }
-            points += 0.05; // Points accrue while still
-            pointsDisplay.innerHTML = points.toFixed(2) + " $STILL";
-        } else {
-            // FAILURE: Play Red.mp4
-            if (feedback.src.indexOf('red.mp4') === -1) {
-                feedback.src = 'red.mp4';
-                status.style.color = "#ff4444";
-                status.innerHTML = "VIOLATION DETECTED";
-            }
-        }
-        
-        requestAnimationFrame(() => runDetection(model));
+        }, 200);
+
+        // Voice Captcha every 5 minutes
+        setInterval(() => {
+            const utter = new SpeechSynthesisUtterance("Silence rating high. Proof of consciousness verified.");
+            utter.pitch = 0.7; synth.speak(utter);
+        }, 300000);
     }
 </script>
-
 </body>
 </html>
