@@ -5,6 +5,7 @@
     <title>The Stillness Protocol | $STILL</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@900&family=Inter:wght@400;900&display=swap" rel="stylesheet">
     <style>
         :root { --gold: #ffd700; --bg: #050505; }
         body { margin: 0; background: var(--bg); color: #e0e0e0; font-family: 'Inter', sans-serif; overflow: hidden; }
@@ -12,14 +13,18 @@
         .active { display: flex; }
         .banner { background: var(--gold); color: #000; padding: 10px; width: 100%; position: fixed; top: 0; text-align: center; font-weight: 900; z-index: 1000; letter-spacing: 2px; }
         
-        #display-stack { width: 640px; height: 480px; border: 4px solid #1a1a1a; position: relative; border-radius: 20px; overflow: hidden; background: #000; }
+        #display-stack { width: 640px; height: 480px; border: 4px solid #1a1a1a; position: relative; border-radius: 20px; overflow: hidden; background: #000; box-shadow: 0 0 50px rgba(255,215,0,0.1); }
         video, #feedback-video { position: absolute; width: 100%; height: 100%; top: 0; left: 0; object-fit: cover; }
         #webcam { transform: scaleX(-1); opacity: 0.15; z-index: 1; }
         #feedback-video { z-index: 2; opacity: 0.8; }
         
-        #status-overlay { position: absolute; top: 40%; width: 100%; text-align: center; font-family: 'Cinzel', serif; font-size: 2.5rem; font-weight: 900; z-index: 10; text-shadow: 0 0 20px #000; }
-        .dashboard { background: #0a0a0a; padding: 30px; border-radius: 24px; border: 1px solid #222; text-align: center; min-width: 420px; margin-top: 20px; }
-        .btn { padding: 15px 35px; background: var(--gold); border: none; font-weight: 900; cursor: pointer; border-radius: 50px; text-transform: uppercase; margin: 10px; }
+        #status-overlay { position: absolute; top: 40%; width: 100%; text-align: center; font-family: 'Cinzel', serif; font-size: 2.2rem; font-weight: 900; z-index: 10; text-shadow: 0 0 20px #000; transition: 0.3s; }
+        .dashboard { background: #0a0a0a; padding: 25px; border-radius: 24px; border: 1px solid #222; text-align: center; min-width: 420px; margin-top: 20px; }
+        .btn { padding: 15px 35px; background: var(--gold); border: none; font-weight: 900; cursor: pointer; border-radius: 50px; text-transform: uppercase; margin: 10px; transition: 0.2s; }
+        .btn:hover { transform: scale(1.05); background: #fff; }
+
+        /* PDF Viewer Container */
+        #pdf-viewer { width: 80%; height: 70vh; border: 1px solid var(--gold); margin-bottom: 20px; border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -27,26 +32,26 @@
 <div class="banner">STILLNESS LEDGER ACTIVE | UNLOCKING: <span id="timer">24:00:00</span></div>
 
 <section id="view-landing" class="view active">
-    <h1 style="font-family:'Cinzel'; color:var(--gold); font-size:3.5rem;">THE STILLNESS PROTOCOL</h1>
+    <h1 style="font-family:'Cinzel'; color:var(--gold); font-size:3rem; text-align: center;">THE STILLNESS PROTOCOL</h1>
     <div class="btn-group">
         <button class="btn" onclick="switchView('view-session'); startVigil();">Begin Session</button>
-        <button class="btn" style="background:transparent; border:1px solid #444; color:#fff;" onclick="switchView('view-sutra')">Sutra</button>
+        <button class="btn" style="background:transparent; border:1px solid #444; color:#fff;" onclick="switchView('view-sutra')">View Sutra</button>
     </div>
 </section>
 
 <section id="view-sutra" class="view">
-    <div style="max-width:600px; line-height:1.8; color:#aaa; border-left: 1px solid var(--gold); padding-left: 30px;">
-        <h2 style="font-family:'Cinzel'; color:var(--gold);">THE SUTRA</h2>
-        <p>"Time spent in stillness is never lost. It is crystallized into the protocol."</p>
-        <button class="btn" onclick="window.location.href='nomadic-whitepaper.pdf'">Download PDF</button>
+    <h2 style="font-family:'Cinzel'; color:var(--gold);">THE SUTRA (WHITE PAPER)</h2>
+    <iframe id="pdf-viewer" src="whitepaper.pdf#toolbar=0"></iframe>
+    <div class="btn-group">
+        <button class="btn" onclick="window.open('whitepaper.pdf', '_blank')">Download PDF</button>
+        <button class="btn" style="background:#222; color:#fff;" onclick="switchView('view-landing')">Back</button>
     </div>
-    <button class="btn" style="background:#222; color:#fff; margin-top:30px;" onclick="switchView('view-landing')">Back</button>
 </section>
 
 <section id="view-session" class="view">
     <div id="display-stack">
         <video id="webcam" autoplay playsinline></video>
-        <video id="feedback-video" autoplay loop muted></video>
+        <video id="feedback-video" autoplay loop muted playsinline></video>
         <div id="status-overlay">AWAITING PRESENCE</div>
     </div>
     <div class="dashboard">
@@ -56,7 +61,7 @@
 </section>
 
 <script>
-    let timeLeft = 86400;
+    let timeLeft = 86400; // 24 Hours
     setInterval(() => {
         let h = Math.floor(timeLeft / 3600);
         let m = Math.floor((timeLeft % 3600) / 60);
@@ -76,10 +81,13 @@
         const status = document.getElementById('status-overlay');
         const vClock = document.getElementById('violation-clock');
         const vInfo = document.getElementById('violation-info');
+        const pointsDisplay = document.getElementById('points');
         
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        // REQUEST CAMERA
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = stream;
 
+        // LOAD AI
         const detector = await faceLandmarksDetection.createDetector(
             faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh, { runtime: 'tfjs' }
         );
@@ -87,19 +95,24 @@
         let violationStartTime = null;
         let points = 0;
         let sessionActive = true;
-        const synth = window.speechSynthesis;
 
-        const loop = setInterval(async () => {
+        const checkLoop = async () => {
             if (!sessionActive) return;
 
             const faces = await detector.estimateFaces(video);
             if (faces.length > 0) {
                 const kp = faces[0].keypoints;
-                const eyeGap = Math.abs(kp[159].y - kp[145].y);
-                const noseY = kp[1].y; 
                 
-                // MANDATE: Eyes closed AND Head above shoulders (Y-axis check)
-                const isCompliant = (eyeGap < 3.8 && noseY < 250);
+                // 1. EYE SCANNER (Top eyelid to Bottom eyelid)
+                const leftEyeGap = Math.abs(kp[159].y - kp[145].y);
+                const rightEyeGap = Math.abs(kp[386].y - kp[374].y);
+                const eyesClosed = (leftEyeGap < 4.0 && rightEyeGap < 4.0);
+
+                // 2. POSTURE SCANNER (Nose Y position - Higher value = Lower head)
+                const noseY = kp[1].y; 
+                const headAboveShoulders = (noseY < 280); // Threshold for centered head
+
+                const isCompliant = eyesClosed && headAboveShoulders;
 
                 if (isCompliant) {
                     violationStartTime = null;
@@ -107,7 +120,10 @@
                     points += 0.05;
                     status.innerText = "STILLNESS ACTIVE";
                     status.style.color = "var(--gold)";
-                    if (!feedback.src.includes('blue.mp4')) feedback.src = 'blue.mp4';
+                    if (!feedback.src.includes('blue.mp4')) {
+                        feedback.src = 'blue.mp4';
+                        feedback.play();
+                    }
                 } else {
                     if (!violationStartTime) violationStartTime = Date.now();
                     const elapsed = (Date.now() - violationStartTime) / 1000;
@@ -115,24 +131,29 @@
                     
                     vInfo.style.visibility = "visible";
                     vClock.innerText = remaining;
-                    status.innerText = "MANDATE VIOLATION";
+                    status.innerText = !eyesClosed ? "EYES MUST BE CLOSED" : "RESTORE POSTURE";
                     status.style.color = "red";
-                    if (!feedback.src.includes('red.mp4')) feedback.src = 'red.mp4';
+                    
+                    if (!feedback.src.includes('red.mp4')) {
+                        feedback.src = 'red.mp4';
+                        feedback.play();
+                    }
 
                     if (elapsed >= 12) {
                         sessionActive = false;
                         status.innerText = "SESSION SEALED";
                         status.style.color = "white";
                         feedback.pause();
-                        const utter = new SpeechSynthesisUtterance("Session terminated. Final accumulation recorded.");
-                        synth.speak(utter);
-                        clearInterval(loop);
-                        // The user keeps their points! No reload.
+                        window.speechSynthesis.speak(new SpeechSynthesisUtterance("Session terminated. Presence recorded."));
+                        return;
                     }
                 }
-                document.getElementById('points').innerText = points.toFixed(2) + " $STILL";
+                pointsDisplay.innerText = points.toFixed(2) + " $STILL";
             }
-        }, 200);
+            requestAnimationFrame(checkLoop);
+        };
+
+        checkLoop();
     }
 </script>
 </body>
